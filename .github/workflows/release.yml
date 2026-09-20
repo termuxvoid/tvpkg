@@ -1,0 +1,124 @@
+# Release builds — tvpkg binaries for Termux/Android.
+#
+# Trigger:
+#   - pushing a tag like v0.1.0 → builds all Termux arches, creates the GitHub
+#     Release and uploads `tvpkg-<ver>-<arch>.tar.gz` + merged SHA256SUMS
+#   - workflow_dispatch → manual rebuild without a tag (uses GITHUB_SHA)
+#
+# Go can only interally link `android/arm64`; the other three Termux arches
+# require external linking (internal/platform.MustLinkExternal), so the NDK
+# clang toolchain is wired in as the C compiler (same approach the Termux
+# community uses). Every job is guarded so it only runs for the owner.
+
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.termux }}
+    runs-on: ubuntu-latest
+    if: github.actor == github.repository_owner
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Termux aarch64
+          - termux: aarch64
+            goarch: arm64
+            triple: aarch64-linux-android
+          # Termux 32-bit ARM (go requires GOARM=7 for Android)
+          - termux: arm
+            goarch: arm
+            goarm: "7"
+            triple: armv7a-linux-androideabi
+          # Termux x86_64
+          - termux: x86_64
+            goarch: amd64
+            triple: x86_64-linux-android
+          # Termux i686 (go requires GO386=sse2 for Android)
+          - termux: i686
+            goarch: "386"
+            go386: sse2
+            triple: i686-linux-android
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.27"
+          cache: true
+
+      - name: Verify build
+        run: |
+          set -eu
+          gofmt -l .
+          go vet ./...
+          go build ./...
+
+      - name: Set up Android NDK
+        run: |
+          set -eu
+          NDK="${ANDROID_NDK_LATEST_HOME:-$(ls -d "${ANDROID_HOME:-/usr/local/lib/android/sdk}"/ndk/* 2>/dev/null | tail -n 1)}"
+          [ -d "$NDK" ] || { echo "Android NDK not found on runner"; exit 1; }
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          echo "CC=${BIN}/${{ matrix.triple }}24-clang" >> "$GITHUB_ENV"
+
+      - name: Cross-compile
+        run: |
+          set -eu
+          # CGO enabled so the external link stage (required for android/arm,
+          # android/386 and android/amd64) can invoke the NDK clang.
+          export CGO_ENABLED=1 GOOS=android GOARCH=${{ matrix.goarch }} \
+            GOARM=${{ matrix.goarm }} GO386=${{ matrix.go386 }}
+          go build -trimpath -ldflags "-s -w -X tvpkg/cmd.version=${GITHUB_REF_NAME:-dev}" -o stage/tvpkg .
+
+      - name: Package
+        run: |
+          set -eu
+          VER="${GITHUB_REF_NAME:-${GITHUB_SHA::7}}"
+          test -f stage/tvpkg
+          ln -s tvpkg stage/tvp
+          NAME="tvpkg-${VER}-${{ matrix.termux }}"
+          # +x + symlink: libarchive/bsdtar is used by Termux package tools
+          tar --transform "s,^stage/,," -czf "$NAME.tar.gz" -C stage tvpkg tvp
+          sha256sum "$NAME.tar.gz" | tee "sha256sums.${{ matrix.termux }}"
+          echo "ARTIFACT=$NAME.tar.gz" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.termux }}
+          path: |
+            *.tar.gz
+            sha256sums.*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.actor == github.repository_owner && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Merge checksums
+        working-directory: dist
+        run: cat sha256sums.* | sort -k2 > SHA256SUMS && rm sha256sums.* && cat SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/SHA256SUMS
