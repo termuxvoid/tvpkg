@@ -30,7 +30,7 @@ var (
 	colRed      = lipgloss.Color(cRed)
 	colMauve    = lipgloss.Color(cMauve)
 	colOverlay  = lipgloss.Color(cOverlay0)
-	colSurface  = lipgloss.Color(cSurface0)
+	colSurface0 = lipgloss.Color(cSurface0)
 	colSurface1 = lipgloss.Color(cSurface1)
 
 	appStyle = lipgloss.NewStyle().
@@ -40,9 +40,6 @@ var (
 	logoStyle = lipgloss.NewStyle().
 			Foreground(colLav).
 			Bold(true)
-
-	headerTextStyle = lipgloss.NewStyle().
-			Foreground(colSubtext)
 
 	statStyle = lipgloss.NewStyle().
 			Foreground(colSubtext)
@@ -68,19 +65,15 @@ var (
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(colGreen)
 
-	titleStyle = lipgloss.NewStyle().
-			Foreground(colLav).
-			Bold(true)
-
-	selectedTitleStyle = lipgloss.NewStyle().
-				Foreground(colMauve).
+	selectedNameStyle = lipgloss.NewStyle().
+				Foreground(colText).
 				Bold(true)
 
-	descStyle = lipgloss.NewStyle().
-			Foreground(colSubtext)
+	hlStyle = lipgloss.NewStyle().
+		Foreground(colYellow).
+		Bold(true)
 
-	selectedDescStyle = lipgloss.NewStyle().
-				Foreground(colText)
+	dotStyle = lipgloss.NewStyle().Bold(true)
 
 	versionStyle = lipgloss.NewStyle().
 			Foreground(colYellow)
@@ -91,12 +84,6 @@ var (
 	taskStyle = lipgloss.NewStyle().
 			Foreground(colText).
 			Bold(true)
-
-	paginationStyle = lipgloss.NewStyle().
-			Foreground(colSubtext)
-
-	hintStyle = lipgloss.NewStyle().
-			Foreground(colSubtext).Italic(true)
 
 	actionActiveStyle = lipgloss.NewStyle().
 				Background(colMauve).

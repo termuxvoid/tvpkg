@@ -1,13 +1,9 @@
 package tui
 
 import (
-	"fmt"
-	"io"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -52,33 +48,6 @@ func (a action) String() string {
 	return ""
 }
 
-// pkgItem adapts a pkgmanager.Package for the bubbles/list component.
-type pkgItem struct {
-	pkg pkgmanager.Package
-}
-
-func (p pkgItem) Title() string { return p.pkg.Name }
-
-func (p pkgItem) Description() string {
-	var sb strings.Builder
-	if p.pkg.Installed {
-		sb.WriteString("● ")
-	} else {
-		sb.WriteString("○ ")
-	}
-	if p.pkg.Version != "" {
-		sb.WriteString(p.pkg.Version + " ")
-	}
-	if p.pkg.Desc != "" {
-		sb.WriteString(p.pkg.Desc)
-	}
-	return sb.String()
-}
-
-func (p pkgItem) FilterValue() string {
-	return p.pkg.Name + " " + p.pkg.Desc
-}
-
 // Messages.
 type loadPkgsMsg struct {
 	pkgs      []pkgmanager.Package
@@ -99,6 +68,13 @@ type taskDoneMsg struct {
 
 type taskTickMsg time.Time
 
+// tap records the last touch/click position so a quick second tap on the
+// same row triggers the focused action (mouse/touchscreen support).
+type tap struct {
+	x, y int
+	at   time.Time
+}
+
 // Model is the tvpkg TUI.
 type Model struct {
 	info detect.Info
@@ -108,13 +84,17 @@ type Model struct {
 	state         state
 	action        action
 
-	list    list.Model
-	spinner spinner.Model
-	view    viewport.Model
+	search    textinput.Model
+	searching bool
+	spinner   spinner.Model
+	view      viewport.Model
 
 	pkgs      []pkgmanager.Package
+	results   []pkgmanager.Package
 	installed int
-	selector  int
+	cursor    int
+
+	lastTap tap
 
 	task    string
 	live    *pkgmanager.Live
@@ -125,35 +105,24 @@ type Model struct {
 
 // New creates the TUI model.
 func New(info detect.Info, mgr *pkgmanager.Manager) Model {
-	d := pkgDelegate{}
+	search := textinput.New()
+	search.Prompt = ""
+	search.PromptStyle = lipgloss.NewStyle()
+	search.Placeholder = "search packages…"
+	search.PlaceholderStyle = lipgloss.NewStyle().Foreground(colOverlay)
+	search.CursorStyle = lipgloss.NewStyle().Foreground(colMauve)
+	search.CharLimit = 80
+	search.Focus()
+
 	m := Model{
 		info:    info,
 		mgr:     mgr,
 		state:   stateLoading,
 		action:  actInstall,
-		list:    list.New([]list.Item{}, d, 40, 20),
+		search:  search,
 		spinner: spinner.New(spinner.WithSpinner(spinner.Dot), spinner.WithStyle(spinnerStyle)),
 		view:    viewport.New(40, 10),
 	}
-	m.list.SetShowTitle(false)
-	m.list.SetShowStatusBar(false)
-	m.list.SetShowHelp(false)
-	m.list.SetShowPagination(false)
-	// The search box and pagination/status line are rendered by us (see views.go)
-	// so the TUI behaves like a search-first (fzf-style) launcher.
-	m.list.SetShowFilter(false)
-	m.list.SetFilteringEnabled(true)
-	styles := list.DefaultStyles()
-	styles.FilterPrompt = lipgloss.NewStyle().Foreground(colLav).Bold(true).Padding(0, 1)
-	styles.FilterCursor = lipgloss.NewStyle().Foreground(colMauve)
-	styles.PaginationStyle = paginationStyle
-	m.list.Styles = styles
-	// We draw our own "search" label, so drop the built-in prompt.
-	m.list.FilterInput.Prompt = ""
-	m.list.FilterInput.PromptStyle = lipgloss.NewStyle()
-	m.list.FilterInput.Placeholder = "search packages…"
-	m.list.FilterInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(colOverlay)
-	m.list.FilterInput.CursorStyle = lipgloss.NewStyle().Foreground(colMauve)
 	return m
 }
 
@@ -166,11 +135,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		h := m.height - 5
-		if h < 3 {
-			h = 3
+		m.search.Width = m.width - 4
+		if m.search.Width < 10 {
+			m.search.Width = 10
 		}
-		m.list.SetSize(m.width-2, h)
 		w, h := m.width-4, m.height-6
 		if w < 10 {
 			w = 10
@@ -227,10 +195,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case list.FilterMatchesMsg:
-		var cmd tea.Cmd
-		m.list, cmd = m.list.Update(msg)
-		return m, cmd
+	case tea.MouseMsg:
+		switch m.state {
+		case stateBrowse:
+			return m.updateBrowseMouse(msg)
+		case stateResult, stateDetail:
+			var cmd tea.Cmd
+			m.view, cmd = m.view.Update(msg)
+			return m, cmd
+		}
 
 	case tea.KeyMsg:
 		switch m.state {
@@ -259,77 +232,122 @@ func (m Model) handleLoaded(msg loadPkgsMsg) (tea.Model, tea.Cmd) {
 	if m.state != stateLoading && m.state != stateResult {
 		return m, nil
 	}
-	items := make([]list.Item, len(msg.pkgs))
-	for i, p := range msg.pkgs {
-		items[i] = pkgItem{pkg: p}
+	m.refilter()
+	if len(m.results) > 0 {
+		if m.cursor >= len(m.results) {
+			m.cursor = len(m.results) - 1
+		}
+		if m.cursor < 0 {
+			m.cursor = 0
+		}
 	}
 	m.state = stateBrowse
-	cmd := m.list.SetItems(items)
-	// Open straight into the fuzzy search so the user starts typing.
-	m.list.SetFilterText("")
-	m.list.SetFilterState(list.Filtering)
-	return m, tea.Batch(cmd, textinput.Blink)
+	if m.searching {
+		return m, textinput.Blink
+	}
+	return m, nil
 }
 
 func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Keep the fuzzy search input active at all times while browsing.
-	if m.list.FilterState() != list.Filtering {
-		m.list.SetFilterState(list.Filtering)
-	}
-
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
 
-	case "tab":
-		m.cycleAction(1)
-		return m, nil
-	case "shift+tab":
-		m.cycleAction(-1)
+	case "esc":
+		// Close the popup back to the home screen; never dump the full list.
+		if m.searching {
+			m.searching = false
+			m.search.SetValue("")
+			m.results = nil
+			m.cursor = 0
+		}
 		return m, nil
 
 	case "enter":
-		// Enter runs the focused action on the selected search result.
-		if m.list.FilterValue() != "" && len(m.list.VisibleItems()) > 0 {
+		// Enter runs the focused action on the selected result.
+		if m.searching && m.search.Value() != "" && len(m.results) > 0 {
 			return m, m.runAction()
 		}
 		return m, nil
 
-	case "esc":
-		// Clear the query but stay in search mode (never dump the full list).
-		m.list.SetFilterText("")
-		m.list.SetFilterState(list.Filtering)
-		return m, textinput.Blink
-	}
+	case "tab", "shift+tab":
+		if m.searching {
+			d := 1
+			if msg.String() == "shift+tab" {
+				d = -1
+			}
+			m.cycleAction(d)
+		}
+		return m, nil
 
-	// Navigation keys are consumed here so they move the result cursor
-	// instead of being typed into the search box.
-	switch msg.String() {
-	case "up":
-		m.list.CursorUp()
-		return m, nil
-	case "down":
-		m.list.CursorDown()
-		return m, nil
-	case "pgup":
-		m.list.PrevPage()
-		return m, nil
-	case "pgdown":
-		m.list.NextPage()
+	case "up", "down", "left", "right", "pgup", "pgdown", "home", "end":
+		// Arrow keys navigate the results, never the search text cursor.
+		if m.searching && len(m.results) > 0 {
+			m.moveCursorKey(msg.String())
+		}
 		return m, nil
 	}
 
-	// Everything else goes to the list, i.e. the fuzzy search input.
+	// Everything else is typed into the search box; the first printable
+	// key opens the popup (telescope-style live search).
+	if !m.searching {
+		m.searching = true
+	}
+	old := m.search.Value()
 	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
+	m.search, cmd = m.search.Update(msg)
+	if m.search.Value() != old {
+		m.refilter()
+		m.cursor = 0
+	}
 	return m, cmd
+}
+
+func (m Model) updateBrowseMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if !m.searching || len(m.results) == 0 {
+		return m, nil
+	}
+	_, ph, _, padY := m.popupRect()
+	innerY := msg.Y - (padY + 1)
+	const resultsTop = 3
+	if innerY >= resultsTop && msg.Action == tea.MouseActionPress &&
+		msg.Button == tea.MouseButtonLeft {
+		k := m.resultsRows(ph)
+		row := innerY - resultsTop
+		if row >= 0 && row < k {
+			pageStart := (m.cursor / k) * k
+			idx := pageStart + row
+			if idx >= 0 && idx < len(m.results) {
+				now := time.Now()
+				if m.lastTap.at.After(time.Time{}) &&
+					now.Sub(m.lastTap.at) < 400*time.Millisecond &&
+					msg.X == m.lastTap.x && msg.Y == m.lastTap.y {
+					// Double tap: run the focused action.
+					m.cursor = idx
+					m.lastTap = tap{}
+					return m, m.runAction()
+				}
+				m.cursor = idx
+				m.lastTap = tap{x: msg.X, y: msg.Y, at: now}
+			}
+		}
+	}
+	if msg.Action == tea.MouseActionPress {
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.moveCursor(-3)
+		case tea.MouseButtonWheelDown:
+			m.moveCursor(3)
+		}
+	}
+	return m, nil
 }
 
 func (m Model) updateDetail(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q", "enter":
 		m.state = stateBrowse
-		return m, nil
+		return m, textinput.Blink
 	case "ctrl+c":
 		return m, tea.Quit
 	}
@@ -342,7 +360,7 @@ func (m Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "enter":
 		m.state = stateBrowse
-		return m, nil
+		return m, textinput.Blink
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	}
@@ -364,15 +382,72 @@ func (m Model) cycleAction(d int) {
 }
 
 func (m Model) selected() (pkgmanager.Package, bool) {
-	item, ok := m.list.SelectedItem().(pkgItem)
-	if !ok {
+	if m.cursor < 0 || m.cursor >= len(m.results) {
 		return pkgmanager.Package{}, false
 	}
-	return item.pkg, true
+	return m.results[m.cursor], true
 }
 
-// runAction starts the selected package's focused action.
-func (m Model) runAction() tea.Cmd {
+// moveCursorKey moves the result cursor. up/down step one row; left/right
+// and pgup/pgdown page through the results; home/end jump to the edges.
+func (m *Model) moveCursorKey(k string) {
+	n := len(m.results)
+	if n == 0 {
+		return
+	}
+	page := m.resultsRows(m.popupHeight())
+	switch k {
+	case "up":
+		m.cursor--
+	case "down":
+		m.cursor++
+	case "left", "pgup":
+		m.cursor -= page
+	case "right", "pgdown":
+		m.cursor += page
+	case "home":
+		m.cursor = 0
+	case "end":
+		m.cursor = n - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor >= n {
+		m.cursor = n - 1
+	}
+}
+
+func (m *Model) moveCursor(d int) {
+	if len(m.results) == 0 {
+		return
+	}
+	m.cursor += d
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor >= len(m.results) {
+		m.cursor = len(m.results) - 1
+	}
+}
+
+// refilter rebuilds the result slice from the current search query using a
+// case-insensitive substring match on the name (preferred) and description.
+func (m *Model) refilter() {
+	q := strings.ToLower(m.search.Value())
+	m.results = m.results[:0]
+	for _, p := range m.pkgs {
+		if q == "" ||
+			strings.Contains(strings.ToLower(p.Name), q) ||
+			strings.Contains(strings.ToLower(p.Desc), q) {
+			m.results = append(m.results, p)
+		}
+	}
+}
+
+// runAction starts the selected package's focused action. It is a pointer
+// receiver so the state changes (busy/result) survive into the returned Model.
+func (m *Model) runAction() tea.Cmd {
 	pkg, ok := m.selected()
 	if !ok {
 		return nil
@@ -405,7 +480,7 @@ func (m Model) runAction() tea.Cmd {
 	return nil
 }
 
-func (m Model) startTask(live *pkgmanager.Live) tea.Cmd {
+func (m *Model) startTask(live *pkgmanager.Live) tea.Cmd {
 	m.state = stateBusy
 	m.live = live
 	m.result = ""
@@ -447,53 +522,26 @@ func infoCmd(mgr *pkgmanager.Manager, name string) tea.Cmd {
 	}
 }
 
-// pkgDelegate renders package rows with an installed indicator and fuzzy
-// match highlighting.
-type pkgDelegate struct{}
-
-func (d pkgDelegate) Height() int                               { return 2 }
-func (d pkgDelegate) Spacing() int                              { return 0 }
-func (d pkgDelegate) Update(msg tea.Msg, m *list.Model) tea.Cmd { return nil }
-func (d pkgDelegate) ShortHelp() []key.Binding                  { return nil }
-func (d pkgDelegate) FullHelp() []key.Binding                   { return nil }
-
-func (d pkgDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	pi := item.(pkgItem)
-	pkg := pi.pkg
-	selected := m.Index() == index
-
-	dot := lipgloss.NewStyle().Foreground(colOverlay).Render("○")
-	if pkg.Installed {
-		dot = lipgloss.NewStyle().Foreground(colGreen).Render("●")
+// queryHighlight wraps the matched substring of name in a highlighted style.
+func (m Model) queryHighlight(name, q string) string {
+	q = strings.ToLower(q)
+	if q == "" {
+		return name
 	}
-
-	marker := "  "
-	if selected {
-		marker = "❯ "
+	i := strings.Index(strings.ToLower(name), q)
+	if i < 0 {
+		return name
 	}
+	return name[:i] + hlStyle.Render(name[i:i+len(q)]) + name[i+len(q):]
+}
 
-	var title string
-	if selected {
-		title = selectedTitleStyle.Render(pkg.Name)
-	} else {
-		title = titleStyle.Render(pkg.Name)
+func truncateRunes(s string, max int) string {
+	if max < 1 {
+		return ""
 	}
-
-	var meta strings.Builder
-	if pkg.Version != "" {
-		if selected {
-			meta.WriteString(versionStyle.Render(pkg.Version) + "  ")
-		} else {
-			meta.WriteString(versionStyle.Render(pkg.Version) + "  ")
-		}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
 	}
-	if pkg.Desc != "" {
-		if selected {
-			meta.WriteString(selectedDescStyle.Render(pkg.Desc))
-		} else {
-			meta.WriteString(descStyle.Render(pkg.Desc))
-		}
-	}
-
-	fmt.Fprintf(w, "%s%s %s\n      %s\n", marker, dot, title, meta.String())
+	return string(r[:max-1]) + "…"
 }

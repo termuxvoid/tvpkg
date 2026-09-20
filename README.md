@@ -34,15 +34,22 @@ Run without arguments to open the **TUI**:
 tvpkg
 ```
 
+It opens on a launcher screen; start typing to pop up a small centered
+search window (fzf/telescope style) with live results:
+
 Keybinds in the TUI:
 
-| Key        | Action                                  |
-|------------|-----------------------------------------|
-| `↑/k`,`↓/j`| move through the package list           |
-| `/`        | fuzzy-filter packages                   |
-| `tab`      | cycle action (Install / Remove / Info)  |
-| `enter`    | run the selected action                 |
-| `q` / `esc`| quit / go back                          |
+| Key           | Action                                  |
+|---------------|-----------------------------------------|
+| `type`        | open search window and filter live      |
+| `↑/↓`         | move up / down through results          |
+| `←/→`         | page up / down through results          |
+| `PgUp`,`PgDn` | page up / down (also `Home`, `End`)     |
+| `tab`         | cycle action (Install / Remove / Info)  |
+| `enter`       | run the selected action                 |
+| `esc`         | close the search window                 |
+| `ctrl+c`      | quit                                    |
+| touchscreen   | tap = select, double-tap = run, scroll = navigate |
 
 Non-interactive commands:
 
