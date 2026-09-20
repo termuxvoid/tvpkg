@@ -13,7 +13,7 @@ it, but adds a fuzzy-search TUI and works with either backend.
 Install from the TermuxVoid repository:
 
 ```sh
-pkg install tvpkgs
+pkg install tvpkg
 ```
 
 Packages and prebuilt binaries are published at
