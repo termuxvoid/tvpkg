@@ -34,11 +34,11 @@ Run without arguments to open the **TUI**:
 tvpkg
 ```
 
-It opens on a launcher screen with a `tvpkg` banner (adapts to the terminal
-size); start typing to pop up a small centered search window (fzf/telescope
-style) with live results. Operations run on a clean progress screen (spinner,
-progress bar, elapsed time) instead of flooding the terminal with apt/pacman
-output; the raw log is still one key away.
+It opens on the package-manager home screen with a `tvpkg` banner (adapts to
+the terminal size); start typing to pop up a small centered search window
+(fzf/telescope style) with live results. Operations run on a clean progress
+screen (spinner, progress bar, elapsed time) instead of flooding the terminal
+with apt/pacman output; the raw log is still one key away.
 
 Keybinds in the TUI:
 

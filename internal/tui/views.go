@@ -52,7 +52,8 @@ func (m Model) View() string {
 	return ""
 }
 
-// homeView is the launcher start screen shown before the search popup opens.
+// homeView is the package manager's home screen shown before the search
+// popup opens.
 func (m Model) homeView() string {
 	h, w := m.height, m.width
 	if h < 1 {
@@ -72,7 +73,7 @@ func (m Model) homeView() string {
 	} else {
 		sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colLav).Bold(true).Render("tvpkg"), w) + "\n")
 	}
-	sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colSubtext).Render("termuxvoid package launcher"), w) + "\n")
+	sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colSubtext).Render("termuxvoid package manager"), w) + "\n")
 	sb.WriteString(m.centered(m.statLine(), w) + "\n\n")
 
 	rows := m.resultsRows(m.popupHeight())

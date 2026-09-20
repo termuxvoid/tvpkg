@@ -23,7 +23,7 @@ var tvpkgRows = []string{
 }
 
 // splash returns the banner art when the terminal is big enough to show it
-// comfortably, adapting to screen size like other launcher tools.
+// comfortably, adapting to screen size like other terminal package managers.
 func (m Model) splash() ([]string, bool) {
 	if m.width >= 34 {
 		return termuxvoidRows, true
