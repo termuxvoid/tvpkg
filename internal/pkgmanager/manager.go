@@ -5,6 +5,7 @@ package pkgmanager
 
 import (
 	"fmt"
+	"strings"
 
 	"tvpkg/internal/detect"
 )
@@ -200,7 +201,7 @@ func (m *Manager) InstalledSet() (map[string]bool, error) {
 
 	switch m.Kind {
 	case detect.APT:
-		out, err = m.run.Capture("dpkg-query", "-W", "-f=${binary:Package}\n")
+		out, err = m.run.Capture("dpkg-query", "-W", "-f=${db:Status-Abbrev} ${binary:Package}\n")
 	case detect.Pacman:
 		out, err = m.run.Capture("pacman", "-Qq")
 	default:
@@ -209,12 +210,28 @@ func (m *Manager) InstalledSet() (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, line := range splitLines(out) {
-		if line != "" {
-			set[line] = true
-		}
-	}
+	parseInstalledInto(set, m.Kind, out)
 	return set, nil
+}
+
+// parseInstalledInto fills set with fully-installed package names. apt's
+// dpkg-query lists packages in any dpkg state (for example "rc": removed but
+// config files remain), which a remove already failed to purge — only "ii"
+// (desired install, status installed) counts as installed.
+func parseInstalledInto(set map[string]bool, kind detect.Kind, out string) {
+	for _, line := range splitLines(out) {
+		if line == "" {
+			continue
+		}
+		if kind == detect.APT {
+			f := strings.Fields(line)
+			if len(f) >= 2 && f[0] == "ii" && f[1] != "" {
+				set[f[1]] = true
+			}
+			continue
+		}
+		set[line] = true
+	}
 }
 
 func (m *Manager) bad() error {

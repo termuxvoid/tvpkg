@@ -3,6 +3,7 @@ package tui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -36,13 +37,25 @@ func TestDrive(t *testing.T) {
 	step("git")
 	m = upd(m, tea.KeyMsg{Type: tea.KeyDown})
 	step("git+down")
+	// down moved the cursor; left/right cycle the action, never the cursor.
+	// gitsome is not installed, so Remove is unavailable and right advances
+	// straight from Install to Info (skipping the disabled remove).
 	m = upd(m, tea.KeyMsg{Type: tea.KeyRight})
-	step("git+right(page)")
+	step("git+right (remove skipped)")
+	if m.action != actInfo {
+		t.Fatalf("after right action=%d, want actInfo (remove skipped)", m.action)
+	}
+	m = upd(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.action != actInstall {
+		t.Fatalf("after right again action=%d, want actInstall", m.action)
+	}
 	m = upd(m, tea.KeyMsg{Type: tea.KeyLeft})
-	step("git+left")
-	// after down: cursor 1; right(clamps to last): gitg; left(clamps to 0): git
-	if got := m.results[m.cursor].Name; got != "git" {
-		t.Fatalf("after arrows cursor = %s, want git", got)
+	m = upd(m, tea.KeyMsg{Type: tea.KeyLeft})
+	if m.action != actInstall {
+		t.Fatalf("after left x2 action=%d, want actInstall", m.action)
+	}
+	if got := m.results[m.cursor].Name; got != "gitsome" {
+		t.Fatalf("cursor moved by left/right = %s, want gitsome", got)
 	}
 	m = upd(m, tea.KeyMsg{Type: tea.KeyEsc})
 	step("esc->home")
@@ -77,11 +90,208 @@ func TestDrive(t *testing.T) {
 	if m.state != stateBusy && m.state != stateResult {
 		t.Fatalf("double-tap should start the action, got state=%d", m.state)
 	}
+
+	// A successful operation must stay on the Result window until esc,
+	// even though the installed-state refresh lands right after it.
+	m = upd(m, tea.Msg(taskDoneMsg{})) // the earlier fake-manager run finished
+	m = upd(m, loadPkgsMsg{pkgs: pkgs, installed: 2})
+	if m.state != stateResult {
+		t.Fatalf("result window should persist after refresh, got state=%d", m.state)
+	}
+	m = upd(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.state != stateBrowse {
+		t.Fatalf("esc from result should reopen the search, got state=%d", m.state)
+	}
 }
 
 func upd(m Model, msg tea.Msg) Model {
 	mm, _ := m.Update(msg)
 	return mm.(Model)
+}
+
+func TestInstalledActionDisabled(t *testing.T) {
+	pkgs := []pkgmanager.Package{
+		{Name: "nano", Version: "7.2", Desc: "editor", Installed: true},
+	}
+	var m Model = New(detect.Info{Kind: detect.APT}, &pkgmanager.Manager{})
+	m = upd(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = upd(m, loadPkgsMsg{pkgs: pkgs, installed: 1})
+	key := func(r rune) {
+		m = upd(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
+	}
+	key('n')
+	if m.action != actRemove {
+		t.Fatalf("selecting an installed pkg should default the action to remove, got action=%d", m.action)
+	}
+
+	// Cycling must skip the disabled Install: remove -> info -> remove.
+	m = upd(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.action != actInfo {
+		t.Fatalf("after right on installed pkg action=%d, want actInfo (install skipped)", m.action)
+	}
+	m = upd(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.action != actRemove {
+		t.Fatalf("after right x2 on installed pkg action=%d, want actRemove", m.action)
+	}
+
+	// The Install slot renders as a disabled "installed" tag, not a runnable
+	// pill, and even a stale Install action must not trigger anything.
+	m.action = actInstall
+	v := m.View()
+	if !strings.Contains(v, "installed") {
+		t.Fatalf("expected an installed tag in the action bar:\n%s", v)
+	}
+	if strings.Contains(v, " Install ") {
+		t.Fatalf("Install pill must not render for an installed package:\n%s", v)
+	}
+	m = upd(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.state != stateBrowse {
+		t.Fatalf("Enter on a disabled install must be a no-op, got state=%d", m.state)
+	}
+}
+
+func TestHeaderSingleLine(t *testing.T) {
+	var m Model = New(detect.Info{Kind: detect.Pacman}, &pkgmanager.Manager{})
+	m.installed = 117
+	m.pkgs = make([]pkgmanager.Package, 5332)
+	s := m.header()
+	if strings.Contains(s, "\n") {
+		t.Fatalf("header must be a single line, got:\n%s", s)
+	}
+	if strings.Contains(s, "╭") || strings.Contains(s, "╰") {
+		t.Fatalf("header should not render border boxes, got: %q", s)
+	}
+	if !strings.Contains(s, "Pacman") || !strings.Contains(s, "117 / 5332 installed") {
+		t.Fatalf("header missing manager/stats: %q", s)
+	}
+
+	apt := New(detect.Info{Kind: detect.APT}, &pkgmanager.Manager{})
+	apt.installed = 4
+	apt.pkgs = make([]pkgmanager.Package, 4944)
+	if s := apt.header(); !strings.Contains(s, "APT") {
+		t.Fatalf("apt header missing badge: %q", s)
+	}
+}
+
+func TestInstalledRefreshAfterOp(t *testing.T) {
+	pkgs := []pkgmanager.Package{{Name: "nano", Version: "7.2", Desc: "editor"}}
+	var m Model = New(detect.Info{Kind: detect.APT}, &pkgmanager.Manager{})
+	m = upd(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = upd(m, loadPkgsMsg{pkgs: pkgs, installed: 0})
+	key := func(r rune) {
+		m = upd(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
+	}
+	key('n')
+	if m.action != actInstall {
+		t.Fatalf("action on uninstalled pkg=%d, want actInstall", m.action)
+	}
+
+	m.opPkg, m.opInstall = "nano", true
+	m.applyOpResult()
+	if !m.pkgs[0].Installed {
+		t.Fatal("install should mark the package installed immediately")
+	}
+	if m.installed != 1 {
+		t.Fatalf("installed count after install=%d, want 1", m.installed)
+	}
+	if m.action != actRemove {
+		t.Fatalf("action after install=%d, want actRemove (resynced)", m.action)
+	}
+	if v := m.View(); !strings.Contains(v, "installed") {
+		t.Fatalf("pills should show the installed tag after install:\n%s", v)
+	}
+
+	m.opPkg, m.opInstall = "nano", false
+	m.applyOpResult()
+	if m.pkgs[0].Installed {
+		t.Fatal("remove should mark the package as not installed immediately")
+	}
+	if m.installed != 0 {
+		t.Fatalf("installed count after remove=%d, want 0", m.installed)
+	}
+	// Remove just became invalid, so the action advances past it to Info.
+	if m.action != actInfo {
+		t.Fatalf("action after remove=%d, want actInfo (resynced)", m.action)
+	}
+}
+
+func TestPacmanInfoDisabledForUninstalled(t *testing.T) {
+	pkgs := []pkgmanager.Package{{Name: "nano", Version: "7.2", Desc: "editor"}}
+	var m Model = New(detect.Info{Kind: detect.Pacman}, &pkgmanager.Manager{})
+	m = upd(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = upd(m, loadPkgsMsg{pkgs: pkgs, installed: 0})
+	key := func(r rune) {
+		m = upd(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
+	}
+	key('n')
+	if !m.actionDisabled(pkgs[0], actInfo) {
+		t.Fatal("pacman info must be disabled for a package that is not installed")
+	}
+	if m.action != actInstall {
+		t.Fatalf("action on uninstalled pacman pkg=%d, want actInstall", m.action)
+	}
+	// Only Install is valid here: remove and info are disabled, so cycling
+	// must wrap straight back to Install.
+	m = upd(m, tea.KeyMsg{Type: tea.KeyRight})
+	if m.action != actInstall {
+		t.Fatalf("cycle on uninstalled pacman pkg=%d, want actInstall (others disabled)", m.action)
+	}
+	// Enter must never run a disabled action (no busy state, no install).
+	if cmd := m.runAction(); cmd != nil {
+		t.Fatal("runAction on all-disabled selection should be a no-op")
+	}
+}
+
+func TestParseProgress(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"", 0},
+		{"preparing", 0},
+		{"(Reading database ... 42%", 42},
+		{"almost 101%", 100},
+	}
+	for _, c := range cases {
+		if got := parseProgress(c.in); got != c.want {
+			t.Fatalf("parseProgress(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+func TestCleanAptWarnings(t *testing.T) {
+	in := "WARNING: apt does not have a stable CLI interface. Use with caution in scripts.\nReading package lists...\n"
+	if got := cleanAptWarnings(in); strings.Contains(got, "stable CLI") {
+		t.Fatalf("apt warning not cleaned: %q", got)
+	}
+}
+
+func TestBusyView(t *testing.T) {
+	var m Model = New(detect.Info{Kind: detect.APT}, &pkgmanager.Manager{})
+	m = upd(m, tea.WindowSizeMsg{Width: 60, Height: 24})
+	m.state = stateBusy
+	m.task = "Installing nano"
+	m.ticks = 3
+	m.progress = 58
+	m.taskStart = time.Now().Add(-90 * time.Second)
+
+	v := m.View()
+	for _, want := range []string{"Installing nano", "58% complete"} {
+		if !strings.Contains(v, want) {
+			t.Fatalf("busy view missing %q:\n%s", want, v)
+		}
+	}
+
+	m.ticks = 90
+	m.progress = 0
+	if v := m.View(); !strings.Contains(v, "working ·") {
+		t.Fatalf("indeterminate busy view missing elapsed marker:\n%s", v)
+	}
+
+	m.showLog = true
+	if v := m.View(); !strings.Contains(v, "Installing nano") {
+		t.Fatalf("log view missing task:\n%s", v)
+	}
 }
 
 func dumpLines(s string) string {

@@ -34,8 +34,11 @@ Run without arguments to open the **TUI**:
 tvpkg
 ```
 
-It opens on a launcher screen; start typing to pop up a small centered
-search window (fzf/telescope style) with live results:
+It opens on a launcher screen with a `tvpkg` banner (adapts to the terminal
+size); start typing to pop up a small centered search window (fzf/telescope
+style) with live results. Operations run on a clean progress screen (spinner,
+progress bar, elapsed time) instead of flooding the terminal with apt/pacman
+output; the raw log is still one key away.
 
 Keybinds in the TUI:
 
@@ -43,13 +46,26 @@ Keybinds in the TUI:
 |---------------|-----------------------------------------|
 | `type`        | open search window and filter live      |
 | `↑/↓`         | move up / down through results          |
-| `←/→`         | page up / down through results          |
+| `←/→`         | cycle action (Install / Remove / Info)  |
 | `PgUp`,`PgDn` | page up / down (also `Home`, `End`)     |
 | `tab`         | cycle action (Install / Remove / Info)  |
 | `enter`       | run the selected action                 |
-| `esc`         | close the search window                 |
-| `ctrl+c`      | quit                                    |
+| `esc`         | close the search window / close result  |
+| `l` / `o`     | toggle the raw tool log while busy      |
+| `q`, `ctrl+c` | quit                                    |
 | touchscreen   | tap = select, double-tap = run, scroll = navigate |
+
+The action pills always reflect the selected package's real state and the
+list refreshes automatically after every operation:
+
+- an **installed** package shows a green `●` and a disabled `installed` tag
+  where the Install button would be — Install is skipped while cycling and
+  never runs,
+- **Remove** is dimmed for packages that are not installed,
+- in Pacman mode **Info** is only offered for installed packages.
+
+The header shows the package manager in use plus live `installed / available`
+counts, and the Result window stays open after an operation until `esc`.
 
 Non-interactive commands:
 

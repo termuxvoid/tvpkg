@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -30,9 +31,7 @@ func (m Model) View() string {
 		return m.popupView()
 
 	case stateBusy:
-		pane := m.truncate(lipgloss.NewStyle().Foreground(colSubtext).Render(m.liveOutput()), m.height-8)
-		return m.header() + "\n\n  " + m.spinner.View() + " " + taskStyle.Render(m.task) +
-			"\n\n" + outputPane.Render(pane) + "\n" + m.helpBar()
+		return m.busyView()
 
 	case stateResult:
 		heading := okStyle.Render("✓ Operation completed")
@@ -65,7 +64,14 @@ func (m Model) homeView() string {
 
 	var sb strings.Builder
 	sb.WriteString("\n\n")
-	sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colLav).Bold(true).Render("tvpkg"), w) + "\n")
+	if art, ok := m.splash(); ok {
+		for _, ln := range art {
+			sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colLav).Render(ln), w) + "\n")
+		}
+		sb.WriteString("\n")
+	} else {
+		sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colLav).Bold(true).Render("tvpkg"), w) + "\n")
+	}
 	sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colSubtext).Render("Termux package launcher"), w) + "\n")
 	sb.WriteString(m.centered(m.statLine(), w) + "\n\n")
 
@@ -77,7 +83,7 @@ func (m Model) homeView() string {
 	sb.WriteString(m.centered(hint1, w) + "\n")
 	sb.WriteString(m.centered(hint2, w) + "\n\n")
 	sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colOverlay).Italic(true).
-		Render(fmt.Sprintf("hint: ~%d matches per page, ←/→ pages too", rows)), w) + "\n")
+		Render(fmt.Sprintf("hint: ~%d matches fit, ←/→ switch install · remove · info", rows)), w) + "\n")
 
 	return sb.String()
 }
@@ -171,9 +177,10 @@ func (m Model) popupView() string {
 	}
 
 	// Action pills.
-	lines = append(lines, "  "+m.actionBar())
+	pkg, hasPkg := m.selected()
+	lines = append(lines, "  "+m.actionBar(pkg, hasPkg))
 	lines = append(lines, lipgloss.NewStyle().Foreground(colSubtext).Render(
-		"  "+help("↑/↓", "move")+sepHelp+help("←/→", "page")+sepHelp+help("enter", "run")+
+		"  "+help("↑/↓", "move")+sepHelp+help("←/→", "action")+sepHelp+help("enter", "run")+
 			sepHelp+help("tab", "action")+sepHelp+help("esc", "close"))+"  "+lipgloss.NewStyle().
 		Foreground(colOverlay).Render("[tap select · double-tap run · scroll navigate]"))
 
@@ -326,11 +333,22 @@ func (m Model) header() string {
 			" / "+statNumStyle.Render(fmt.Sprintf("%d", len(m.pkgs)))+" installed")
 }
 
-func (m Model) actionBar() string {
+// actionBar renders the Install / Remove / Info pills, honoring the selected
+// package's state: an installed package shows a green "installed" tag in the
+// Install slot, and remove is dimmed for packages that are not installed.
+func (m Model) actionBar(pkg pkgmanager.Package, hasPkg bool) string {
 	var sb strings.Builder
 	for a := actInstall; a < actCount; a++ {
+		if hasPkg && a == actInstall && pkg.Installed {
+			sb.WriteString(installedTagStyle.Render("installed"))
+			continue
+		}
 		style := actionInactiveStyle
-		if m.action == a {
+		disabled := hasPkg && a != actInstall && m.actionDisabled(pkg, a)
+		if disabled {
+			style = disabledActionStyle
+		}
+		if m.action == a && !disabled {
 			style = actionActiveStyle
 		}
 		sb.WriteString(style.Render(a.String()))
@@ -344,7 +362,7 @@ func (m Model) helpBar() string {
 	var sb strings.Builder
 	switch m.state {
 	case stateBusy:
-		sb.WriteString(help("ctrl+c", "abort"))
+		sb.WriteString(help("l", "log") + sepHelp + help("ctrl+c", "abort"))
 	case stateResult, stateDetail:
 		sb.WriteString(help("esc", "back") + sepHelp + help("↑/↓", "scroll") + sepHelp + help("q", "quit"))
 	}
@@ -359,7 +377,94 @@ func (m Model) liveOutput() string {
 	if m.live == nil {
 		return ""
 	}
-	return m.truncate(m.live.Output(), m.height-8)
+	return m.truncate(cleanAptWarnings(m.live.Output()), m.height-8)
+}
+
+// busyView shows a clean progress screen while a package operation runs.
+// The raw tool log is hidden behind an 'l' toggle so the terminal does not
+// fill with apt's noisy mid-flight output.
+func (m Model) busyView() string {
+	if m.showLog {
+		pane := lipgloss.NewStyle().Foreground(colSubtext).Render(m.liveOutput())
+		return m.header() + "\n\n  " + m.spinner.View() + " " + taskStyle.Render(m.task) +
+			"\n\n" + outputPane.Render(pane) + "\n" + m.helpBar()
+	}
+
+	w := m.width
+	var sb strings.Builder
+	sb.WriteString(m.header())
+	sb.WriteString("\n\n\n")
+	sb.WriteString(m.centered(m.spinner.View()+" "+taskStyle.Render(m.task), w))
+	sb.WriteString("\n\n")
+	sb.WriteString(m.centered(m.progressBar(), w))
+	sb.WriteString("\n\n")
+	if m.progress > 0 {
+		sb.WriteString(m.centered(statStyle.Render(fmt.Sprintf("%d%% complete", m.progress)), w))
+	} else {
+		sb.WriteString(m.centered(statStyle.Render("working · "+m.elapsed()), w))
+	}
+	sb.WriteString("\n")
+	sb.WriteString(m.centered(m.helpBar(), w))
+	return sb.String()
+}
+
+// elapsed returns the time since the current task started as m:ss.
+func (m Model) elapsed() string {
+	s := int(time.Since(m.taskStart).Seconds())
+	return fmt.Sprintf("%d:%02d", s/60, s%60)
+}
+
+// progressBar renders a determinate bar when apt reports a percentage, or an
+// animated sweep otherwise.
+func (m Model) progressBar() string {
+	barW := m.width - 8
+	if barW < 10 {
+		barW = 10
+	}
+	if barW > 60 {
+		barW = 60
+	}
+
+	if m.progress > 0 {
+		n := barW * m.progress / 100
+		if n > barW {
+			n = barW
+		}
+		pct := lipgloss.NewStyle().Background(colMauve).Render(strings.Repeat(" ", n))
+		rest := lipgloss.NewStyle().Background(colSurface0).Render(strings.Repeat(" ", barW-n))
+		return pct + rest + " " + versionStyle.Render(fmt.Sprintf("%d%%", m.progress))
+	}
+
+	seg := barW / 3
+	if seg < 1 {
+		seg = 1
+	}
+	pos := m.ticks % (barW + seg)
+	if pos > barW {
+		pos = barW - seg
+	}
+	var sb strings.Builder
+	for i := 0; i < barW; i++ {
+		on := i >= pos && i < pos+seg
+		if on {
+			sb.WriteString(lipgloss.NewStyle().Background(colLav).Render(" "))
+		} else {
+			sb.WriteString(lipgloss.NewStyle().Background(colSurface0).Render(" "))
+		}
+	}
+	return sb.String()
+}
+
+// cleanAptWarnings strips apt's "unstable CLI interface" noise.
+func cleanAptWarnings(s string) string {
+	var kept []string
+	for _, ln := range strings.Split(s, "\n") {
+		if strings.Contains(ln, "does not have a stable CLI") {
+			continue
+		}
+		kept = append(kept, ln)
+	}
+	return strings.Join(kept, "\n")
 }
 
 // truncate keeps only the last n lines of s.

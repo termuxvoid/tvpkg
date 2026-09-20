@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,6 +103,14 @@ type Model struct {
 	result  string
 	errMsg  string
 	infoOut string
+
+	taskStart time.Time
+	ticks     int
+	progress  int
+	showLog   bool
+
+	opPkg     string
+	opInstall bool
 }
 
 // New creates the TUI model.
@@ -174,15 +184,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.out == "" {
 			msg.out = "(no output)"
 		}
-		m.view.SetContent(msg.out)
+		m.view.SetContent(cleanAptWarnings(msg.out))
 		if msg.err != nil {
 			return m, nil
 		}
-		// Refresh installed state after a successful operation.
+		// Flip the acted-on package's installed state immediately so the
+		// Install/Remove buttons are current the moment the op completes,
+		// then reconcile counts/details with a background refresh.
+		m.applyOpResult()
 		return m, loadPkgsCmd(m.mgr)
 
 	case taskTickMsg:
 		if m.state == stateBusy {
+			m.ticks++
+			if m.live != nil {
+				m.progress = parseProgress(m.live.Output())
+			}
 			return m, tea.Tick(taskTickInterval, func(t time.Time) tea.Msg { return taskTickMsg(t) })
 		}
 		return m, nil
@@ -229,9 +246,6 @@ func (m Model) handleLoaded(msg loadPkgsMsg) (tea.Model, tea.Cmd) {
 	}
 	m.pkgs = msg.pkgs
 	m.installed = msg.installed
-	if m.state != stateLoading && m.state != stateResult {
-		return m, nil
-	}
 	m.refilter()
 	if len(m.results) > 0 {
 		if m.cursor >= len(m.results) {
@@ -241,11 +255,40 @@ func (m Model) handleLoaded(msg loadPkgsMsg) (tea.Model, tea.Cmd) {
 			m.cursor = 0
 		}
 	}
-	m.state = stateBrowse
-	if m.searching {
-		return m, textinput.Blink
+	// Only the initial load leaves the loading screen. After a successful
+	// install/remove the Result window stays up until the user presses esc,
+	// so the post-task refresh updates data in the background and nothing else.
+	if m.state == stateLoading {
+		m.state = stateBrowse
+		if m.searching {
+			return m, textinput.Blink
+		}
 	}
+	m.syncActionToSelection()
 	return m, nil
+}
+
+// applyOpResult marks the package that was just installed/removed in the
+// current list so the Install/Remove buttons reflect reality immediately.
+func (m *Model) applyOpResult() {
+	if m.opPkg == "" {
+		return
+	}
+	for i := range m.pkgs {
+		if m.pkgs[i].Name != m.opPkg {
+			continue
+		}
+		if m.opInstall && !m.pkgs[i].Installed {
+			m.pkgs[i].Installed = true
+			m.installed++
+		} else if !m.opInstall && m.pkgs[i].Installed {
+			m.pkgs[i].Installed = false
+			m.installed--
+		}
+	}
+	m.refilter()
+	m.syncActionToSelection()
+	m.opPkg = ""
 }
 
 func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -280,7 +323,18 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case "up", "down", "left", "right", "pgup", "pgdown", "home", "end":
+	case "left", "right":
+		// Cycle the action (install / remove / info); never the text cursor.
+		if m.searching {
+			d := 1
+			if msg.String() == "left" {
+				d = -1
+			}
+			m.cycleAction(d)
+		}
+		return m, nil
+
+	case "up", "down", "pgup", "pgdown", "home", "end":
 		// Arrow keys navigate the results, never the search text cursor.
 		if m.searching && len(m.results) > 0 {
 			m.moveCursorKey(msg.String())
@@ -299,6 +353,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.search.Value() != old {
 		m.refilter()
 		m.cursor = 0
+		m.syncActionToSelection()
 	}
 	return m, cmd
 }
@@ -324,10 +379,12 @@ func (m Model) updateBrowseMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 					msg.X == m.lastTap.x && msg.Y == m.lastTap.y {
 					// Double tap: run the focused action.
 					m.cursor = idx
+					m.syncActionToSelection()
 					m.lastTap = tap{}
 					return m, m.runAction()
 				}
 				m.cursor = idx
+				m.syncActionToSelection()
 				m.lastTap = tap{x: msg.X, y: msg.Y, at: now}
 			}
 		}
@@ -373,12 +430,47 @@ func (m Model) updateBusy(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
+	case "l", "o":
+		m.showLog = !m.showLog
 	}
 	return m, nil
 }
 
-func (m Model) cycleAction(d int) {
-	m.action = action((int(m.action) + d + int(actCount)) % int(actCount))
+// actionDisabled reports whether an action is not applicable to a package:
+// you cannot install a package that is already installed, nor remove one
+// that is not installed. In pacman mode `pacman -Si` does not surface remote
+// packages, so info is only offered for installed packages there too.
+func (m Model) actionDisabled(pkg pkgmanager.Package, a action) bool {
+	if pkg.Installed && a == actInstall {
+		return true
+	}
+	if !pkg.Installed && a == actRemove {
+		return true
+	}
+	if m.info.IsPacman() && !pkg.Installed && a == actInfo {
+		return true
+	}
+	return false
+}
+
+func (m *Model) cycleAction(d int) {
+	pkg, ok := m.selected()
+	for i := 0; i < int(actCount); i++ {
+		m.action = action((int(m.action) + d + int(actCount)) % int(actCount))
+		if !ok || !m.actionDisabled(pkg, m.action) {
+			return
+		}
+	}
+}
+
+// syncActionToSelection nudges the focused action to an applicable one when
+// the cursor lands on a package that cannot perform it.
+func (m *Model) syncActionToSelection() {
+	pkg, ok := m.selected()
+	if !ok || !m.actionDisabled(pkg, m.action) {
+		return
+	}
+	m.cycleAction(1)
 }
 
 func (m Model) selected() (pkgmanager.Package, bool) {
@@ -388,8 +480,8 @@ func (m Model) selected() (pkgmanager.Package, bool) {
 	return m.results[m.cursor], true
 }
 
-// moveCursorKey moves the result cursor. up/down step one row; left/right
-// and pgup/pgdown page through the results; home/end jump to the edges.
+// moveCursorKey moves the result cursor. up/down step one row; pgup/pgdown
+// page through the results; home/end jump to the edges.
 func (m *Model) moveCursorKey(k string) {
 	n := len(m.results)
 	if n == 0 {
@@ -401,9 +493,9 @@ func (m *Model) moveCursorKey(k string) {
 		m.cursor--
 	case "down":
 		m.cursor++
-	case "left", "pgup":
+	case "pgup":
 		m.cursor -= page
-	case "right", "pgdown":
+	case "pgdown":
 		m.cursor += page
 	case "home":
 		m.cursor = 0
@@ -416,6 +508,7 @@ func (m *Model) moveCursorKey(k string) {
 	if m.cursor >= n {
 		m.cursor = n - 1
 	}
+	m.syncActionToSelection()
 }
 
 func (m *Model) moveCursor(d int) {
@@ -429,6 +522,7 @@ func (m *Model) moveCursor(d int) {
 	if m.cursor >= len(m.results) {
 		m.cursor = len(m.results) - 1
 	}
+	m.syncActionToSelection()
 }
 
 // refilter rebuilds the result slice from the current search query using a
@@ -452,6 +546,9 @@ func (m *Model) runAction() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	if m.actionDisabled(pkg, m.action) {
+		return nil
+	}
 
 	switch m.action {
 	case actInstall:
@@ -461,6 +558,7 @@ func (m *Model) runAction() tea.Cmd {
 			m.errMsg = err.Error()
 			return nil
 		}
+		m.opPkg, m.opInstall = pkg.Name, true
 		m.task = "Installing " + pkg.Name
 		return m.startTask(live)
 	case actRemove:
@@ -470,6 +568,7 @@ func (m *Model) runAction() tea.Cmd {
 			m.errMsg = err.Error()
 			return nil
 		}
+		m.opPkg, m.opInstall = pkg.Name, false
 		m.task = "Removing " + pkg.Name
 		return m.startTask(live)
 	case actInfo:
@@ -485,6 +584,10 @@ func (m *Model) startTask(live *pkgmanager.Live) tea.Cmd {
 	m.live = live
 	m.result = ""
 	m.errMsg = ""
+	m.taskStart = time.Now()
+	m.ticks = 0
+	m.progress = 0
+	m.showLog = false
 	cmds := []tea.Cmd{
 		waitCmd(live),
 		tea.Tick(taskTickInterval, func(t time.Time) tea.Msg { return taskTickMsg(t) }),
@@ -497,6 +600,26 @@ func waitCmd(live *pkgmanager.Live) tea.Cmd {
 		err := live.Wait()
 		return taskDoneMsg{err: err, out: live.Output()}
 	}
+}
+
+// progressRe matches apt-style percentages such as "(Reading database ... 42%".
+var progressRe = regexp.MustCompile(`(\d{1,3})%`)
+
+// parseProgress pulls the last percentage out of live tool output so the
+// progress bar can fill up as apt reports its progress.
+func parseProgress(s string) int {
+	all := progressRe.FindAllStringSubmatch(s, -1)
+	if len(all) == 0 {
+		return 0
+	}
+	n, err := strconv.Atoi(all[len(all)-1][1])
+	if err != nil {
+		return 0
+	}
+	if n > 100 {
+		n = 100
+	}
+	return n
 }
 
 func loadPkgsCmd(mgr *pkgmanager.Manager) tea.Cmd {

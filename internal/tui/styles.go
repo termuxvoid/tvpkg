@@ -48,22 +48,20 @@ var (
 			Foreground(lipgloss.Color(cPeach))
 
 	badgeAptStyle = lipgloss.NewStyle().
-			Foreground(colText).
+			Foreground(lipgloss.Color(cBase)).
 			Background(colBlue).
 			Bold(true).
 			Padding(0, 1).
 			MarginLeft(1).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colBlue)
+			MarginRight(1)
 
 	badgePacmanStyle = lipgloss.NewStyle().
-				Foreground(colText).
+				Foreground(lipgloss.Color(cBase)).
 				Background(colGreen).
 				Bold(true).
 				Padding(0, 1).
 				MarginLeft(1).
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(colGreen)
+				MarginRight(1)
 
 	selectedNameStyle = lipgloss.NewStyle().
 				Foreground(colText).
@@ -95,6 +93,23 @@ var (
 	actionInactiveStyle = lipgloss.NewStyle().
 				Background(colSurface1).
 				Foreground(colSubtext).
+				Padding(0, 1).
+				MarginRight(1)
+
+	// installedTagStyle marks the (disabled) Install slot of an already
+	// installed package: a green status tag instead of an actionable pill.
+	installedTagStyle = lipgloss.NewStyle().
+				Background(colSurface1).
+				Foreground(colGreen).
+				Bold(true).
+				Padding(0, 1).
+				MarginRight(1)
+
+	// disabledActionStyle dims a pill whose action is not applicable to the
+	// selected package (e.g. remove on a package that is not installed).
+	disabledActionStyle = lipgloss.NewStyle().
+				Background(colSurface1).
+				Foreground(colOverlay).
 				Padding(0, 1).
 				MarginRight(1)
 
