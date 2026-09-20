@@ -129,6 +129,56 @@ func (m *Manager) ListInstalled() error {
 	return m.bad()
 }
 
+// Upgrade upgrades all installed packages to their latest versions, mirroring
+// pkg: apt refreshes first then full-upgrades; pacman does a single -Syu.
+func (m *Manager) Upgrade() error {
+	switch m.Kind {
+	case detect.APT:
+		if err := m.run.Stream("apt", "update"); err != nil {
+			return err
+		}
+		return m.run.Stream("apt", "full-upgrade", "-y")
+	case detect.Pacman:
+		return m.run.Stream("pacman", "-Syu", "--noconfirm")
+	}
+	return m.bad()
+}
+
+// Clean removes every package from the cache (apt clean / pacman -Scc).
+func (m *Manager) Clean() error {
+	switch m.Kind {
+	case detect.APT:
+		return m.run.Stream("apt", "clean")
+	case detect.Pacman:
+		return m.run.Stream("pacman", "-Scc")
+	}
+	return m.bad()
+}
+
+// AutoClean removes outdated package files from the cache, keeping the latest
+// (apt autoclean / pacman -Sc).
+func (m *Manager) AutoClean() error {
+	switch m.Kind {
+	case detect.APT:
+		return m.run.Stream("apt", "autoclean")
+	case detect.Pacman:
+		return m.run.Stream("pacman", "-Sc")
+	}
+	return m.bad()
+}
+
+// Files shows every file installed by the given packages
+// (dpkg -L / pacman -Ql).
+func (m *Manager) Files(pkgs ...string) error {
+	switch m.Kind {
+	case detect.APT:
+		return m.run.Stream("dpkg", append([]string{"-L"}, pkgs...)...)
+	case detect.Pacman:
+		return m.run.Stream("pacman", append([]string{"-Ql"}, pkgs...)...)
+	}
+	return m.bad()
+}
+
 // InstallWithOutput installs packages and returns the captured output.
 func (m *Manager) InstallWithOutput(pkgs ...string) (string, error) {
 	switch m.Kind {

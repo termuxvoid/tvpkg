@@ -38,7 +38,8 @@ var pkgmgrFlag string
 func init() {
 	rootCmd.PersistentFlags().StringVar(&pkgmgrFlag, "pkgmgr", "",
 		"package manager to use: apt or pacman (default: auto-detect)")
-	rootCmd.AddCommand(installCmd, removeCmd, searchCmd, updateCmd, listCmd, infoCmd)
+	rootCmd.AddCommand(installCmd, removeCmd, searchCmd, updateCmd, listCmd, infoCmd,
+		upgradeCmd, cleanCmd, autocleanCmd, listInstalledCmd, filesCmd)
 }
 
 // Execute runs the CLI.

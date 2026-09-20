@@ -74,10 +74,17 @@ tvpkg install <pkgs...>   (i)  apt install -y / pacman -S
 tvpkg remove  <pkgs...>   (r)  apt remove -y  / pacman -R
 tvpkg search  <query>     (s)  apt-cache search / pacman -Ss
 tvpkg update              (u)  apt update        / pacman -Sy
+tvpkg upgrade             (up) apt update && full-upgrade / pacman -Syu
 tvpkg list                (l)  list available packages
-tvpkg list --installed    (li) list installed packages
+tvpkg list-installed     (li)  list installed packages
 tvpkg info    <pkg>            show package metadata
+tvpkg files   <pkgs...>   (f)  dpkg -L / pacman -Ql
+tvpkg clean                   apt clean        / pacman -Scc
+tvpkg autoclean               apt autoclean    / pacman -Sc
 ```
+
+Commands mirror Termux's `pkg` script (`$PREFIX/bin/pkg`): same underlying
+backend operations, same aliases (`upg`, `cl`, `ac`, `li`, `f`).
 
 ### Options
 

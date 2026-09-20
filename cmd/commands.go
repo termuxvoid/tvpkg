@@ -95,6 +95,81 @@ var infoCmd = &cobra.Command{
 	},
 }
 
+var upgradeCmd = &cobra.Command{
+	Use:     "upgrade",
+	Aliases: []string{"upg", "up"},
+	Short:   "Upgrade all installed packages",
+	Args:    cobra.NoArgs,
+	Example: "  tvpkg upgrade\n  tvpkg upg",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, mgr, err := resolve()
+		if err != nil {
+			return err
+		}
+		return mgr.Upgrade()
+	},
+}
+
+var cleanCmd = &cobra.Command{
+	Use:     "clean",
+	Aliases: []string{"cl"},
+	Short:   "Remove all packages from the package cache",
+	Args:    cobra.NoArgs,
+	Example: "  tvpkg clean",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, mgr, err := resolve()
+		if err != nil {
+			return err
+		}
+		return mgr.Clean()
+	},
+}
+
+var autocleanCmd = &cobra.Command{
+	Use:     "autoclean",
+	Aliases: []string{"ac", "autoc"},
+	Short:   "Remove outdated packages from the package cache",
+	Args:    cobra.NoArgs,
+	Example: "  tvpkg autoclean\n  tvpkg ac",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, mgr, err := resolve()
+		if err != nil {
+			return err
+		}
+		return mgr.AutoClean()
+	},
+}
+
+var listInstalledCmd = &cobra.Command{
+	Use:     "list-installed",
+	Aliases: []string{"li", "installed"},
+	Short:   "List installed packages",
+	Args:    cobra.NoArgs,
+	Example: "  tvpkg list-installed\n  tvpkg li",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, mgr, err := resolve()
+		if err != nil {
+			return err
+		}
+		return mgr.ListInstalled()
+	},
+}
+
+var filesCmd = &cobra.Command{
+	Use:     "files <pkgs...>",
+	Aliases: []string{"f"},
+	Short:   "Show all files installed by packages",
+	Args:    cobra.MinimumNArgs(1),
+	Example: "  tvpkg files git\n  tvpkg f nano",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		_, mgr, err := resolve()
+		if err != nil {
+			return err
+		}
+		return mgr.Files(args...)
+	},
+}
+
 func init() {
 	listCmd.Flags().BoolP("installed", "i", false, "list only installed packages")
 }
