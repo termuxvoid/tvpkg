@@ -41,6 +41,9 @@ var (
 			Foreground(colLav).
 			Bold(true)
 
+	brandStyle = lipgloss.NewStyle().
+			Foreground(colSubtext)
+
 	statStyle = lipgloss.NewStyle().
 			Foreground(colSubtext)
 

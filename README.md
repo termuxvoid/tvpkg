@@ -2,22 +2,22 @@
 
 `tvpkg` (also available as `tvp`) is a wrapper around Termux's package
 manager, supporting both **APT** and **Pacman**, with an interactive TUI and
-a fast command-line interface.
+a fast command-line interface. It is part of the
+[TermuxVoid](https://termuxvoid.github.io/) project.
 
 Real help is the package that ships with Termux (`pkg`); tvpkg behaves like
 it, but adds a fuzzy-search TUI and works with either backend.
 
 ## Install
 
-tvpkg is packaged for both Termux package formats:
+Install from the TermuxVoid repository:
 
 ```sh
-# APT
-apt install tvpkg
-
-# Pacman
-pacman -S tvpkg
+pkg install tvpkgs
 ```
+
+Packages and prebuilt binaries are published at
+<https://termuxvoid.github.io/>.
 
 Or run it straight from source:
 

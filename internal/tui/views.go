@@ -72,7 +72,7 @@ func (m Model) homeView() string {
 	} else {
 		sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colLav).Bold(true).Render("tvpkg"), w) + "\n")
 	}
-	sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colSubtext).Render("Termux package launcher"), w) + "\n")
+	sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colSubtext).Render("termuxvoid package launcher"), w) + "\n")
 	sb.WriteString(m.centered(m.statLine(), w) + "\n\n")
 
 	rows := m.resultsRows(m.popupHeight())
@@ -83,7 +83,9 @@ func (m Model) homeView() string {
 	sb.WriteString(m.centered(hint1, w) + "\n")
 	sb.WriteString(m.centered(hint2, w) + "\n\n")
 	sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colOverlay).Italic(true).
-		Render(fmt.Sprintf("hint: ~%d matches fit, ←/→ switch install · remove · info", rows)), w) + "\n")
+		Render(fmt.Sprintf("hint: ~%d matches fit, ←/→ switch install · remove · info", rows)), w) + "\n\n")
+	sb.WriteString(m.centered(lipgloss.NewStyle().Foreground(colOverlay).
+		Render(logoStyle.Render("tvpkg")+" "+brandStyle.Render("· termuxvoid")), w))
 
 	return sb.String()
 }
@@ -123,12 +125,8 @@ func (m Model) popupView() string {
 	var lines []string
 
 	// Title.
-	badge := "APT"
-	if m.info.IsPacman() {
-		badge = "Pacman"
-	}
 	title := lipgloss.NewStyle().Foreground(colLav).Bold(true).
-		Render("tvpkg · " + badge + " launcher")
+		Render("tvpkg · termuxvoid")
 	lines = append(lines, " "+title)
 
 	// Search input.
@@ -328,7 +326,8 @@ func (m Model) header() string {
 		badge = "Pacman"
 		style = badgePacmanStyle
 	}
-	return logoStyle.Render("tvpkg") + style.Render(badge) +
+	return logoStyle.Render("tvpkg") + " " + brandStyle.Render("termuxvoid") +
+		" " + style.Render(badge) +
 		statStyle.Render("  "+statNumStyle.Render(fmt.Sprintf("%d", m.installed))+
 			" / "+statNumStyle.Render(fmt.Sprintf("%d", len(m.pkgs)))+" installed")
 }
