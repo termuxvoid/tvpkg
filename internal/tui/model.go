@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -137,13 +138,22 @@ func New(info detect.Info, mgr *pkgmanager.Manager) Model {
 	m.list.SetShowTitle(false)
 	m.list.SetShowStatusBar(false)
 	m.list.SetShowHelp(false)
-	m.list.SetShowPagination(true)
+	m.list.SetShowPagination(false)
+	// The search box and pagination/status line are rendered by us (see views.go)
+	// so the TUI behaves like a search-first (fzf-style) launcher.
+	m.list.SetShowFilter(false)
 	m.list.SetFilteringEnabled(true)
 	styles := list.DefaultStyles()
 	styles.FilterPrompt = lipgloss.NewStyle().Foreground(colLav).Bold(true).Padding(0, 1)
 	styles.FilterCursor = lipgloss.NewStyle().Foreground(colMauve)
 	styles.PaginationStyle = paginationStyle
 	m.list.Styles = styles
+	// We draw our own "search" label, so drop the built-in prompt.
+	m.list.FilterInput.Prompt = ""
+	m.list.FilterInput.PromptStyle = lipgloss.NewStyle()
+	m.list.FilterInput.Placeholder = "search packages…"
+	m.list.FilterInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(colOverlay)
+	m.list.FilterInput.CursorStyle = lipgloss.NewStyle().Foreground(colMauve)
 	return m
 }
 
@@ -156,7 +166,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.list.SetSize(m.width-2, m.height-3)
+		h := m.height - 5
+		if h < 3 {
+			h = 3
+		}
+		m.list.SetSize(m.width-2, h)
 		w, h := m.width-4, m.height-6
 		if w < 10 {
 			w = 10
@@ -251,30 +265,61 @@ func (m Model) handleLoaded(msg loadPkgsMsg) (tea.Model, tea.Cmd) {
 	}
 	m.state = stateBrowse
 	cmd := m.list.SetItems(items)
-	return m, cmd
+	// Open straight into the fuzzy search so the user starts typing.
+	m.list.SetFilterText("")
+	m.list.SetFilterState(list.Filtering)
+	return m, tea.Batch(cmd, textinput.Blink)
 }
 
 func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// While filtering, every key belongs to the list's fuzzy input.
-	if m.list.FilterState() == list.Filtering {
-		var cmd tea.Cmd
-		m.list, cmd = m.list.Update(msg)
-		return m, cmd
+	// Keep the fuzzy search input active at all times while browsing.
+	if m.list.FilterState() != list.Filtering {
+		m.list.SetFilterState(list.Filtering)
 	}
 
 	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+
 	case "tab":
 		m.cycleAction(1)
 		return m, nil
 	case "shift+tab":
 		m.cycleAction(-1)
 		return m, nil
+
 	case "enter":
-		return m, m.runAction()
-	case "esc", "q", "ctrl+c":
-		return m, tea.Quit
+		// Enter runs the focused action on the selected search result.
+		if m.list.FilterValue() != "" && len(m.list.VisibleItems()) > 0 {
+			return m, m.runAction()
+		}
+		return m, nil
+
+	case "esc":
+		// Clear the query but stay in search mode (never dump the full list).
+		m.list.SetFilterText("")
+		m.list.SetFilterState(list.Filtering)
+		return m, textinput.Blink
 	}
 
+	// Navigation keys are consumed here so they move the result cursor
+	// instead of being typed into the search box.
+	switch msg.String() {
+	case "up":
+		m.list.CursorUp()
+		return m, nil
+	case "down":
+		m.list.CursorDown()
+		return m, nil
+	case "pgup":
+		m.list.PrevPage()
+		return m, nil
+	case "pgdown":
+		m.list.NextPage()
+		return m, nil
+	}
+
+	// Everything else goes to the list, i.e. the fuzzy search input.
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd

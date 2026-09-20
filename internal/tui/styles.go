@@ -95,6 +95,9 @@ var (
 	paginationStyle = lipgloss.NewStyle().
 			Foreground(colSubtext)
 
+	hintStyle = lipgloss.NewStyle().
+			Foreground(colSubtext).Italic(true)
+
 	actionActiveStyle = lipgloss.NewStyle().
 				Background(colMauve).
 				Foreground(lipgloss.Color(cBase)).

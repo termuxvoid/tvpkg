@@ -8,7 +8,9 @@
 # Go can only interally link `android/arm64`; the other three Termux arches
 # require external linking (internal/platform.MustLinkExternal), so the NDK
 # clang toolchain is wired in as the C compiler (same approach the Termux
-# community uses). Every job is guarded so it only runs for the owner.
+# community uses). Every job is guarded to the maintainer account: the repo
+# lives under the termuxvoid org, where `repository_owner` is the org, so we
+# match the actor against the maintainer login instead.
 
 name: release
 

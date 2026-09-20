@@ -22,11 +22,17 @@ func (m Model) View() string {
 			lipgloss.NewStyle().Foreground(colLav).Bold(true).Render("Loading package list…")
 
 	case stateBrowse:
-		body := m.list.View()
-		if body == "" {
-			body = " "
+		var body string
+		switch {
+		case m.list.FilterValue() == "":
+			body = hintStyle.Render("  Type to search packages…")
+		case len(m.list.VisibleItems()) == 0:
+			body = hintStyle.Render("  No packages match \u201c" + m.list.FilterValue() + "\u201d")
+		default:
+			body = m.list.View()
 		}
-		return m.header() + "\n" + body + "\n" + m.actionBar() + "\n" + m.helpBar()
+		return m.header() + "\n" + m.searchBox() + "\n" + m.statusLine() +
+			"\n" + body + "\n" + m.actionBar() + "\n" + m.helpBar()
 
 	case stateBusy:
 		pane := m.truncate(lipgloss.NewStyle().Foreground(colSubtext).Render(m.liveOutput()), m.height-8)
@@ -50,6 +56,33 @@ func (m Model) View() string {
 			helpDescStyle.Render("to quit")
 	}
 	return ""
+}
+
+func (m Model) searchBox() string {
+	w := m.width - 4
+	if w < 12 {
+		w = 12
+	}
+	inner := lipgloss.NewStyle().Width(w - 4).Render(m.list.FilterInput.View())
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colSurface1).
+		Padding(0, 1).
+		Render(inner)
+	label := lipgloss.NewStyle().Foreground(colMauve).Bold(true).PaddingRight(1).Render("search")
+	return "  " + label + box
+}
+
+func (m Model) statusLine() string {
+	q := m.list.FilterValue()
+	if q == "" {
+		return statStyle.Render("  " + statNumStyle.Render(fmt.Sprintf("%d", len(m.pkgs))) +
+			" packages available" +
+			statStyle.Render("  ·  ") + statNumStyle.Render(fmt.Sprintf("%d", m.installed)) +
+			" installed")
+	}
+	return statStyle.Render("  " + statNumStyle.Render(fmt.Sprintf("%d", len(m.list.VisibleItems()))) +
+		" matches for \u201c" + q + "\u201d")
 }
 
 func (m Model) header() string {
@@ -81,8 +114,9 @@ func (m Model) helpBar() string {
 	var sb strings.Builder
 	switch m.state {
 	case stateBrowse:
-		sb.WriteString(help("↑/k", "up") + sep + help("↓/j", "down") + sep + help("/", "filter") +
-			sep + help("tab", "action") + sep + help("enter", "run") + sep + help("q", "quit"))
+		sb.WriteString(help("type", "search") + sep + help("↑/↓", "navigate") + sep +
+			help("tab", "action") + sep + help("enter", "run") + sep +
+			help("esc", "clear") + sep + help("ctrl+c", "quit"))
 	case stateBusy:
 		sb.WriteString(help("ctrl+c", "abort"))
 	case stateResult, stateDetail:
