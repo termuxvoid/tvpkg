@@ -8,9 +8,8 @@
 # Go can only interally link `android/arm64`; the other three Termux arches
 # require external linking (internal/platform.MustLinkExternal), so the NDK
 # clang toolchain is wired in as the C compiler (same approach the Termux
-# community uses). Every job is guarded to the maintainer account: the repo
-# lives under the termuxvoid org, where `repository_owner` is the org, so we
-# match the actor against the maintainer login instead.
+# community uses). No actor guard is needed: pushing a tag already requires
+# write access to the repository.
 
 name: release
 
@@ -26,7 +25,6 @@ jobs:
   build:
     name: build ${{ matrix.termux }}
     runs-on: ubuntu-latest
-    if: github.actor == github.repository_owner
     strategy:
       fail-fast: false
       matrix:
@@ -104,7 +102,7 @@ jobs:
 
   release:
     needs: build
-    if: github.actor == github.repository_owner && startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
