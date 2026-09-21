@@ -391,17 +391,7 @@ func (m Model) updateBrowseMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if !m.searching || len(m.results) == 0 {
 		return m, nil
 	}
-	_, ph, padX, padY := m.popupRect()
-
-	// A tap on the action pill row runs that action directly (install/remove
-	// open the confirmation dialog first).
-	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-		innerY := msg.Y - (padY + 1)
-		if innerY == m.resultsRows(ph)+3 {
-			return m, m.tapPill(msg.X - (padX + 1) - 2)
-		}
-	}
-
+	_, ph, _, padY := m.popupRect()
 	innerY := msg.Y - (padY + 1)
 	const resultsTop = 3
 	if innerY >= resultsTop && msg.Action == tea.MouseActionPress &&
@@ -585,23 +575,6 @@ func (m *Model) refilter() {
 			m.results = append(m.results, p)
 		}
 	}
-}
-
-// tapPill maps a tap on the action bar to its pill and runs that action.
-// x is the tap offset within the pill row (0-based, after the two-space
-// prefix). Install/remove open the confirmation dialog; info runs at once.
-func (m *Model) tapPill(x int) tea.Cmd {
-	pkg, ok := m.selected()
-	if !ok {
-		return nil
-	}
-	for _, p := range m.actionPills(pkg, ok) {
-		if x >= p.x && x < p.x+p.w {
-			m.action = p.action
-			return m.runAction()
-		}
-	}
-	return nil
 }
 
 // runAction is invoked on enter/double-tap. For install and remove it

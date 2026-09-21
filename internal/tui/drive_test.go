@@ -158,43 +158,6 @@ func TestInstalledActionDisabled(t *testing.T) {
 	}
 }
 
-func TestTapPillOpensConfirm(t *testing.T) {
-	pkgs := []pkgmanager.Package{
-		{Name: "nano", Version: "7.2", Desc: "editor"},
-	}
-	var m Model = New(detect.Info{Kind: detect.APT}, &pkgmanager.Manager{})
-	m = upd(m, tea.WindowSizeMsg{Width: 80, Height: 24})
-	m = upd(m, loadPkgsMsg{pkgs: pkgs, installed: 0})
-	key := func(r rune) {
-		m = upd(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
-	}
-	key('n')
-
-	// A tap on the Admin pill row. At 80x24 the popup pads ph=18, padY=3, so
-	// the pill row is absolute row 13+4=17; the pills start at col padX+3=11.
-	m = upd(m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 12, Y: 17})
-	if !m.confirm || m.confirmPkg != "nano" || !m.confirmInstall {
-		t.Fatalf("tapping Install pill should open the confirmation dialog, got confirm=%v pkg=%q install=%v",
-			m.confirm, m.confirmPkg, m.confirmInstall)
-	}
-	if m.action != actInstall {
-		t.Fatalf("tap should set action to install, got %d", m.action)
-	}
-
-	// 'n' cancels back to the popup.
-	m = upd(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
-	if m.confirm {
-		t.Fatal("n should cancel the confirmation")
-	}
-
-	// Tapping the Remove pill (unavailable: nano not installed) must be a
-	// no-op — no prompt, no action change to a runnable remove.
-	m = upd(m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 13+8, Y: 17})
-	if m.confirm {
-		t.Fatal("tapping a disabled pill must not open a prompt")
-	}
-}
-
 func TestHeaderSingleLine(t *testing.T) {
 	var m Model = New(detect.Info{Kind: detect.Pacman}, &pkgmanager.Manager{})
 	m.installed = 117
