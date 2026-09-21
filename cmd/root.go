@@ -51,6 +51,7 @@ func init() {
 		"dry-run: print the commands that would be executed without changing the system")
 	rootCmd.AddCommand(installCmd, removeCmd, searchCmd, updateCmd, listCmd, infoCmd,
 		upgradeCmd, cleanCmd, autocleanCmd, listInstalledCmd, filesCmd, fixCmd)
+	installColorHelp()
 }
 
 // Execute runs the CLI.
