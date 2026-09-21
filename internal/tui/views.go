@@ -177,11 +177,22 @@ func (m Model) popupView() string {
 
 	// Action pills.
 	pkg, hasPkg := m.selected()
-	lines = append(lines, "  "+m.actionBar(pkg, hasPkg))
-	lines = append(lines, lipgloss.NewStyle().Foreground(colSubtext).Render(
-		"  "+help("↑/↓", "move")+sepHelp+help("←/→", "action")+sepHelp+help("enter", "run")+
-			sepHelp+help("tab", "action")+sepHelp+help("esc", "close"))+"  "+lipgloss.NewStyle().
-		Foreground(colOverlay).Render("[tap select · double-tap run · scroll navigate]"))
+	if m.confirm {
+		actionLabel := "Install"
+		if !m.confirmInstall {
+			actionLabel = "Remove"
+		}
+		msg := lipgloss.NewStyle().Foreground(colGreen).Bold(true).
+			Render(actionLabel+" "+m.confirmPkg+"?") + "    " +
+			helpDescStyle.Render("(y) confirm") + sepHelp + helpDescStyle.Render("(n) cancel")
+		lines = append(lines, "  "+msg)
+	} else {
+		lines = append(lines, "  "+m.actionBar(pkg, hasPkg))
+		lines = append(lines, lipgloss.NewStyle().Foreground(colSubtext).Render(
+			"  "+help("↑/↓", "move")+sepHelp+help("←/→", "action")+sepHelp+help("enter", "run")+
+				sepHelp+help("tab", "action")+sepHelp+help("esc", "close"))+"  "+lipgloss.NewStyle().
+			Foreground(colOverlay).Render("[tap select · double-tap run · scroll navigate]"))
+	}
 
 	// Normalize line count to the inner height.
 	for len(lines) < ph-2 {
@@ -402,6 +413,13 @@ func (m Model) busyView() string {
 		sb.WriteString(m.centered(statStyle.Render(fmt.Sprintf("%d%% complete", m.progress)), w))
 	} else {
 		sb.WriteString(m.centered(statStyle.Render("working · "+m.elapsed()), w))
+	}
+	if m.busyQuit {
+		warn := errStyle.Render("⚠  Operation still running — quitting may leave the package database broken.")
+		sb.WriteString("\n" + m.centered(warn, w))
+		sb.WriteString("\n" + m.centered(
+			helpDescStyle.Render("(y)")+" "+helpDescStyle.Render("quit anyway")+
+				"   "+helpDescStyle.Render("(n)")+" "+helpDescStyle.Render("keep waiting"), w))
 	}
 	sb.WriteString("\n")
 	sb.WriteString(m.centered(m.helpBar(), w))

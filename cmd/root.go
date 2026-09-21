@@ -2,7 +2,10 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -33,13 +36,21 @@ tvpkg is also available as 'tvp' (same binary, symlink).`,
 	},
 }
 
-var pkgmgrFlag string
+var (
+	pkgmgrFlag  string
+	yesFlag     bool
+	simulateFlag bool
+)
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&pkgmgrFlag, "pkgmgr", "",
 		"package manager to use: apt or pacman (default: auto-detect)")
+	rootCmd.PersistentFlags().BoolVarP(&yesFlag, "yes", "y", false,
+		"skip all confirmation prompts")
+	rootCmd.PersistentFlags().BoolVar(&simulateFlag, "simulate", false,
+		"dry-run: print the commands that would be executed without changing the system")
 	rootCmd.AddCommand(installCmd, removeCmd, searchCmd, updateCmd, listCmd, infoCmd,
-		upgradeCmd, cleanCmd, autocleanCmd, listInstalledCmd, filesCmd)
+		upgradeCmd, cleanCmd, autocleanCmd, listInstalledCmd, filesCmd, fixCmd)
 }
 
 // Execute runs the CLI.
@@ -47,8 +58,27 @@ func Execute() error {
 	return rootCmd.Execute()
 }
 
+// confirm prints msg and returns true when the user answers y/yes (case-
+// insensitive). If --yes is set the prompt is skipped. An empty or invalid
+// answer (including EOF / piped input) is treated as "no".
+func confirm(msg string) bool {
+	if yesFlag {
+		return true
+	}
+	fmt.Fprintf(os.Stderr, "%s [y/N] ", msg)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	}
+	return false
+}
+
 // resolve determines which package manager to use, honoring the --pkgmgr
-// override and refusing to run as root (same policy as Termux's pkg script).
+// override, applying --simulate if requested, and refusing to run as root.
 func resolve() (detect.Info, *pkgmanager.Manager, error) {
 	var kind detect.Kind
 	if pkgmgrFlag != "" {
@@ -69,7 +99,10 @@ func resolve() (detect.Info, *pkgmanager.Manager, error) {
 
 	mgr, err := pkgmanager.New(info.Kind, info.Prefix)
 	if err != nil {
-		return info, nil, err
+		return detect.Info{}, nil, err
+	}
+	if simulateFlag {
+		mgr.SetSimulate(true)
 	}
 	return info, mgr, nil
 }

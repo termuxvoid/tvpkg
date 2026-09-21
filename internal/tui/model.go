@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"tvpkg/internal/audit"
 	"tvpkg/internal/detect"
 	"tvpkg/internal/pkgmanager"
 )
@@ -111,6 +112,11 @@ type Model struct {
 
 	opPkg     string
 	opInstall bool
+
+	confirm        bool
+	confirmPkg     string
+	confirmInstall bool
+	busyQuit       bool
 }
 
 // New creates the TUI model.
@@ -185,6 +191,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			msg.out = "(no output)"
 		}
 		m.view.SetContent(cleanAptWarnings(msg.out))
+		if !m.mgr.Simulate() {
+			op := "info"
+			if m.opPkg != "" {
+				if m.opInstall {
+					op = "install"
+				} else {
+					op = "remove"
+				}
+			}
+			audit.Log(m.info.Prefix, op, m.opPkg, msg.err)
+		}
 		if msg.err != nil {
 			return m, nil
 		}
@@ -292,6 +309,18 @@ func (m *Model) applyOpResult() {
 }
 
 func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.confirm {
+		switch msg.String() {
+		case "y":
+			m.confirm = false
+			return m, m.executePending()
+		case "n", "esc":
+			m.confirm = false
+			return m, nil
+		}
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -429,7 +458,16 @@ func (m Model) updateResult(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateBusy(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m, tea.Quit
+		if m.busyQuit {
+			return m, tea.Quit
+		}
+		m.busyQuit = true
+	case "y":
+		if m.busyQuit {
+			return m, tea.Quit
+		}
+	case "n", "esc":
+		m.busyQuit = false
 	case "l", "o":
 		m.showLog = !m.showLog
 	}
@@ -539,8 +577,8 @@ func (m *Model) refilter() {
 	}
 }
 
-// runAction starts the selected package's focused action. It is a pointer
-// receiver so the state changes (busy/result) survive into the returned Model.
+// runAction is invoked on enter/double-tap. For install and remove it
+// presents a confirmation prompt first; info executes immediately.
 func (m *Model) runAction() tea.Cmd {
 	pkg, ok := m.selected()
 	if !ok {
@@ -549,34 +587,52 @@ func (m *Model) runAction() tea.Cmd {
 	if m.actionDisabled(pkg, m.action) {
 		return nil
 	}
-
 	switch m.action {
-	case actInstall:
-		live, err := m.mgr.StartInstall(pkg.Name)
-		if err != nil {
-			m.state = stateResult
-			m.errMsg = err.Error()
-			return nil
-		}
-		m.opPkg, m.opInstall = pkg.Name, true
-		m.task = "Installing " + pkg.Name
-		return m.startTask(live)
-	case actRemove:
-		live, err := m.mgr.StartRemove(pkg.Name)
-		if err != nil {
-			m.state = stateResult
-			m.errMsg = err.Error()
-			return nil
-		}
-		m.opPkg, m.opInstall = pkg.Name, false
-		m.task = "Removing " + pkg.Name
-		return m.startTask(live)
 	case actInfo:
 		m.state = stateDetail
 		m.infoOut = ""
 		return infoCmd(m.mgr, pkg.Name)
+	case actInstall:
+		m.confirm = true
+		m.confirmPkg = pkg.Name
+		m.confirmInstall = true
+	case actRemove:
+		m.confirm = true
+		m.confirmPkg = pkg.Name
+		m.confirmInstall = false
 	}
 	return nil
+}
+
+// executePending runs the install/remove that was confirmed via the
+// confirmation prompt.
+func (m *Model) executePending() tea.Cmd {
+	pkg := m.confirmPkg
+	if pkg == "" {
+		return nil
+	}
+	var live *pkgmanager.Live
+	var err error
+	if m.confirmInstall {
+		live, err = m.mgr.StartInstall(pkg)
+	} else {
+		live, err = m.mgr.StartRemove(pkg)
+	}
+	if err != nil {
+		m.state = stateResult
+		m.errMsg = err.Error()
+		return nil
+	}
+	m.opPkg = pkg
+	m.opInstall = m.confirmInstall
+	m.confirm = false
+	m.confirmPkg = ""
+	if m.confirmInstall {
+		m.task = "Installing " + pkg
+	} else {
+		m.task = "Removing " + pkg
+	}
+	return m.startTask(live)
 }
 
 func (m *Model) startTask(live *pkgmanager.Live) tea.Cmd {

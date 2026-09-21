@@ -50,6 +50,7 @@ Keybinds in the TUI:
 | `PgUp`,`PgDn` | page up / down (also `Home`, `End`)     |
 | `tab`         | cycle action (Install / Remove / Info)  |
 | `enter`       | run the selected action                 |
+| `y` / `n`     | confirm / cancel (when prompt is open)  |
 | `esc`         | close the search window / close result  |
 | `l` / `o`     | toggle the raw tool log while busy      |
 | `q`, `ctrl+c` | quit                                    |
@@ -78,6 +79,7 @@ tvpkg upgrade             (up) apt update && full-upgrade / pacman -Syu
 tvpkg list                (l)  list available packages
 tvpkg list-installed     (li)  list installed packages
 tvpkg info    <pkg>            show package metadata
+tvpkg fix                    diagnose + repair interrupted databases
 tvpkg files   <pkgs...>   (f)  dpkg -L / pacman -Ql
 tvpkg clean                   apt clean        / pacman -Scc
 tvpkg autoclean               apt autoclean    / pacman -Sc
@@ -90,6 +92,8 @@ backend operations, same aliases (`upg`, `cl`, `ac`, `li`, `f`).
 
 ```
 --pkgmgr apt|pacman   force a package manager (default: auto-detect)
+-y, --yes             skip all confirmation prompts
+--simulate            dry-run: print commands without executing
 ```
 
 Detection order (mirrors `termux-setup-package-manager`):
@@ -97,6 +101,40 @@ Detection order (mirrors `termux-setup-package-manager`):
 of `pacman`/`apt` on `$PREFIX/bin` → fall back to `apt`.
 
 `tvpkg` refuses to run as root, the same policy as the stock `pkg` script.
+
+### Confirmation prompts
+
+Mutating CLI commands (`install`, `remove`, `upgrade`) ask for confirmation
+before proceeding.  A preview of the action (and upgrade plan, if applicable)
+is shown so you can review what will happen.  Reverse-dependency warnings
+are displayed when removing a package.
+
+- **`-y` / `--yes`**: skip all prompts (useful in scripts).
+- **`--simulate`**: preview the commands that would be executed, without changing
+  anything — combines well with `-y` to silently list what would happen.
+- **`TVPKG_DRY_RUN=1`**: environment-variable equivalent of `--simulate`.
+
+In the TUI, install/remove actions open a `(y) confirm / (n) cancel` dialog
+before starting.  During a live operation, `ctrl+c` asks for confirmation
+rather than quitting immediately — answering **n** keeps the operation running,
+while **y** quits (which may leave the database in a broken state).
+
+### Fix command
+
+```
+tvpkg fix
+```
+
+Runs a quick database audit (`dpkg --audit` or `pacman -Dk`) and prints a
+diagnostic.  If issues are found, it offers to run repair commands
+(`dpkg --configure -a --force-confdef --force-confold` or
+`pacman --noconfirm -D --asdeps …`) after a confirmation prompt.
+
+### Audit log
+
+All mutating operations (`install`, `remove`, `upgrade`, `repair`) are
+logged to `$PREFIX/var/log/tvpkg.log` with a timestamp, command, packages,
+and exit status.
 
 ### Dry run
 

@@ -81,14 +81,19 @@ func TestDrive(t *testing.T) {
 		t.Fatalf("want only nano selected, got cursor=%d results=%+v", m.cursor, m.results)
 	}
 
-	// Single tap selects the row; a double tap triggers the focused action.
+	// Single tap selects the row; a double tap opens the confirmation prompt.
 	m = upd(m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 9, Y: 7})
 	m = upd(m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 9, Y: 7})
 	if got := m.results[0].Name; got != "nano" {
 		t.Fatalf("cursor after tap = %s, want nano", got)
 	}
+	if !m.confirm || m.state != stateBrowse {
+		t.Fatalf("double-tap should open confirmation prompt, got state=%d confirm=%v", m.state, m.confirm)
+	}
+	// Confirm with 'y' to start the action (a nil Manager run will error).
+	m = upd(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 	if m.state != stateBusy && m.state != stateResult {
-		t.Fatalf("double-tap should start the action, got state=%d", m.state)
+		t.Fatalf("confirming should start the action, got state=%d", m.state)
 	}
 
 	// A successful operation must stay on the Result window until esc,

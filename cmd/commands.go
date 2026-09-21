@@ -1,6 +1,14 @@
 package cmd
 
-import "github.com/spf13/cobra"
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"tvpkg/internal/audit"
+)
 
 var installCmd = &cobra.Command{
 	Use:     "install <pkgs...>",
@@ -9,11 +17,17 @@ var installCmd = &cobra.Command{
 	Args:    cobra.MinimumNArgs(1),
 	Example: "  tvpkg install git\n  tvpkg i python",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, mgr, err := resolve()
+		info, mgr, err := resolve()
 		if err != nil {
 			return err
 		}
-		return mgr.Install(args...)
+		if !confirm(fmt.Sprintf("Install %s?", strings.Join(args, ", "))) {
+			fmt.Fprintln(os.Stderr, "Aborted.")
+			return nil
+		}
+		err = mgr.Install(args...)
+		audit.Log(info.Prefix, "install", strings.Join(args, " "), err)
+		return err
 	},
 }
 
@@ -24,11 +38,28 @@ var removeCmd = &cobra.Command{
 	Args:    cobra.MinimumNArgs(1),
 	Example: "  tvpkg remove nodejs\n  tvpkg rm python",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, mgr, err := resolve()
+		info, mgr, err := resolve()
 		if err != nil {
 			return err
 		}
-		return mgr.Remove(args...)
+		// Warn about reverse dependencies before confirming.
+		if !simulateFlag {
+			for _, pkg := range args {
+				rdeps, err := mgr.ReverseDepends(pkg)
+				if err == nil && len(rdeps) > 0 {
+					fmt.Fprintf(os.Stderr,
+						"Installed packages depending on %s: %s\n",
+						pkg, strings.Join(rdeps, ", "))
+				}
+			}
+		}
+		if !confirm(fmt.Sprintf("Remove %s?", strings.Join(args, ", "))) {
+			fmt.Fprintln(os.Stderr, "Aborted.")
+			return nil
+		}
+		err = mgr.Remove(args...)
+		audit.Log(info.Prefix, "remove", strings.Join(args, " "), err)
+		return err
 	},
 }
 
@@ -102,11 +133,23 @@ var upgradeCmd = &cobra.Command{
 	Args:    cobra.NoArgs,
 	Example: "  tvpkg upgrade\n  tvpkg upg",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		_, mgr, err := resolve()
+		info, mgr, err := resolve()
 		if err != nil {
 			return err
 		}
-		return mgr.Upgrade()
+		if !simulateFlag {
+			plan, err := mgr.PlanUpgrade()
+			if err == nil && strings.TrimSpace(plan) != "" {
+				fmt.Fprintf(os.Stderr, "Planned upgrades:\n%s\n\n", plan)
+			}
+		}
+		if !confirm("Proceed with the upgrade?") {
+			fmt.Fprintln(os.Stderr, "Aborted.")
+			return nil
+		}
+		err = mgr.Upgrade()
+		audit.Log(info.Prefix, "upgrade", "(all)", err)
+		return err
 	},
 }
 
@@ -170,6 +213,30 @@ var filesCmd = &cobra.Command{
 	},
 }
 
-func init() {
-	listCmd.Flags().BoolP("installed", "i", false, "list only installed packages")
+var fixCmd = &cobra.Command{
+	Use:     "fix",
+	Short:   "Diagnose and optionally repair interrupted package databases",
+	Aliases: []string{"repair"},
+	Args:    cobra.NoArgs,
+	Example: "  tvpkg fix",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		info, mgr, err := resolve()
+		if err != nil {
+			return err
+		}
+		diag, _ := mgr.Fix()
+		fmt.Fprintln(os.Stderr, diag)
+		if simulateFlag {
+			return nil
+		}
+		if strings.Contains(diag, "nothing to fix") {
+			return nil
+		}
+		if confirm("Run repair commands?") {
+			err = mgr.Repair()
+			audit.Log(info.Prefix, "repair", "(db)", err)
+			return err
+		}
+		return nil
+	},
 }
