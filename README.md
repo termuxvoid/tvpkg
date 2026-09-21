@@ -50,11 +50,11 @@ Keybinds in the TUI:
 | `PgUp`,`PgDn` | page up / down (also `Home`, `End`)     |
 | `tab`         | cycle action (Install / Remove / Info)  |
 | `enter`       | run the selected action                 |
-| `y` / `n`     | confirm / cancel (when prompt is open)  |
+| `y` / `n`     | confirm / cancel quit (when `ctrl+c` prompts) |
 | `esc`         | close the search window / close result  |
 | `l` / `o`     | toggle the raw tool log while busy      |
 | `q`, `ctrl+c` | quit                                    |
-| touchscreen   | tap = select, double-tap = run, scroll = navigate |
+| touchscreen   | tap = select, pill tap / double-tap = run, scroll = navigate |
 
 The action pills always reflect the selected package's real state and the
 list refreshes automatically after every operation:
@@ -114,11 +114,8 @@ are displayed when removing a package.
   anything — combines well with `-y` to silently list what would happen.
 - **`TVPKG_DRY_RUN=1`**: environment-variable equivalent of `--simulate`.
 
-In the TUI, the confirmation prompt is tied to the **action pills**: tapping a
-pill (`Install` / `Remove`) opens a prominent centered dialog — `press y to run
-· n / esc to cancel` — before anything starts.  Pressing **Enter** or
-double-tapping a result row runs the selected action directly, without a
-confirmation prompt.
+In the TUI, install/remove start immediately when you press **Enter**, double-tap a
+result row, or tap one of the **action pills** — there is no confirmation prompt.
 
 During a live operation, `ctrl+c` asks for confirmation rather than quitting
 immediately: answering **n** keeps the operation running, while **y** quits

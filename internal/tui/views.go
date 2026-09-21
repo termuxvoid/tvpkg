@@ -25,9 +25,6 @@ func (m Model) View() string {
 			lipgloss.NewStyle().Foreground(colLav).Bold(true).Render("Loading package list…")
 
 	case stateBrowse:
-		if m.confirm {
-			return m.confirmView()
-		}
 		if !m.searching {
 			return m.homeView()
 		}
@@ -111,45 +108,6 @@ func (m Model) statLine() string {
 			fmt.Sprintf("%d installed", m.installed))
 }
 
-// confirmView renders a prominent yes/no dialog centered on the screen before
-// an install or remove is started.
-func (m Model) confirmView() string {
-	w, h := m.width, m.height
-	if w < 1 {
-		w = 80
-	}
-	if h < 1 {
-		h = 24
-	}
-
-	actionLabel := "Install"
-	if !m.confirmInstall {
-		actionLabel = "Remove"
-	}
-
-	question := lipgloss.NewStyle().Foreground(colGreen).Bold(true).
-		Render(actionLabel + " " + m.confirmPkg + "?")
-	keys := helpKeyStyle.Render("y") + "  " + helpDescStyle.Render("yes, " + strings.ToLower(actionLabel)) +
-		"        " + helpKeyStyle.Render("n") + "  " + helpDescStyle.Render("no, cancel")
-	inner := "\n" + question + "\n\n   " + keys + "\n"
-
-	dialog := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colMauve).
-		Padding(0, 2).
-		Render(inner)
-
-	var sb strings.Builder
-	sb.WriteString(m.header())
-	sb.WriteString("\n\n\n")
-	sb.WriteString(m.centered(dialog, w))
-	sb.WriteString("\n\n")
-	sb.WriteString(m.centered(helpDescStyle.Render("press")+" "+helpKeyStyle.Render("y")+" "+
-		helpDescStyle.Render("to run ·")+" "+helpKeyStyle.Render("n")+" / "+helpKeyStyle.Render("esc")+" "+
-		helpDescStyle.Render("to cancel"), w))
-	return sb.String()
-}
-
 // popupView renders the centered search window (vim telescope style).
 func (m Model) popupView() string {
 	w, h := m.width, m.height
@@ -223,7 +181,7 @@ func (m Model) popupView() string {
 	lines = append(lines, lipgloss.NewStyle().Foreground(colSubtext).Render(
 		"  "+help("↑/↓", "move")+sepHelp+help("←/→", "action")+sepHelp+help("enter", "run")+
 			sepHelp+help("tab", "action")+sepHelp+help("esc", "close"))+"  "+lipgloss.NewStyle().
-		Foreground(colOverlay).Render("[tap select · tap a pill to confirm · double-tap run · scroll]"))
+		Foreground(colOverlay).Render("[tap select · tap a pill to run · double-tap run · scroll]"))
 
 	// Normalize line count to the inner height.
 	for len(lines) < ph-2 {

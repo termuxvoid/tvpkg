@@ -113,10 +113,7 @@ type Model struct {
 	opPkg     string
 	opInstall bool
 
-	confirm        bool
-	confirmPkg     string
-	confirmInstall bool
-	busyQuit       bool
+	busyQuit bool
 }
 
 // New creates the TUI model.
@@ -309,18 +306,6 @@ func (m *Model) applyOpResult() {
 }
 
 func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.confirm {
-		switch msg.String() {
-		case "y":
-			m.confirm = false
-			return m, m.executePending()
-		case "n", "esc":
-			m.confirm = false
-			return m, nil
-		}
-		return m, nil
-	}
-
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit
@@ -336,8 +321,7 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		// Enter runs the focused action on the selected result directly
-		// (no confirmation — confirming is done by clicking a pill).
+		// Enter runs the focused action on the selected result.
 		if m.searching && m.search.Value() != "" && len(m.results) > 0 {
 			return m, m.runDirect()
 		}
@@ -394,8 +378,8 @@ func (m Model) updateBrowseMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	_, ph, padX, padY := m.popupRect()
 
-	// A tap on the action-pill row runs that action — for install/remove the
-	// confirmation dialog opens first.
+	// A tap on the action-pill row runs that action (install / remove /
+	// info), no confirmation.
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 		innerY := msg.Y - (padY + 1)
 		if innerY == m.resultsRows(ph)+3 {
@@ -588,8 +572,8 @@ func (m *Model) refilter() {
 	}
 }
 
-// runDirect executes the currently selected action immediately. It is the
-// fast path for Enter and row double-taps: no confirmation is shown.
+// runDirect executes the currently selected action immediately. It is used
+// by Enter, row double-taps, and pill taps alike.
 func (m *Model) runDirect() tea.Cmd {
 	pkg, ok := m.selected()
 	if !ok {
@@ -611,36 +595,9 @@ func (m *Model) runDirect() tea.Cmd {
 	return nil
 }
 
-// runAction is invoked when an action pill is clicked/tapped. For install
-// and remove it presents the confirmation prompt first; info runs at once.
-func (m *Model) runAction() tea.Cmd {
-	pkg, ok := m.selected()
-	if !ok {
-		return nil
-	}
-	if m.actionDisabled(pkg, m.action) {
-		return nil
-	}
-	switch m.action {
-	case actInfo:
-		m.state = stateDetail
-		m.infoOut = ""
-		return infoCmd(m.mgr, pkg.Name)
-	case actInstall:
-		m.confirm = true
-		m.confirmPkg = pkg.Name
-		m.confirmInstall = true
-	case actRemove:
-		m.confirm = true
-		m.confirmPkg = pkg.Name
-		m.confirmInstall = false
-	}
-	return nil
-}
-
 // tapPill maps a tap on the action bar to its pill and runs that action.
 // x is the tap offset within the pill row (0-based, after the two-space
-// prefix). Install/remove open the confirmation dialog; info runs at once.
+// prefix).
 func (m *Model) tapPill(x int) tea.Cmd {
 	pkg, ok := m.selected()
 	if !ok {
@@ -649,7 +606,7 @@ func (m *Model) tapPill(x int) tea.Cmd {
 	for _, p := range m.actionPills(pkg, ok) {
 		if x >= p.x && x < p.x+p.w {
 			m.action = p.action
-			return m.runAction()
+			return m.runDirect()
 		}
 	}
 	return nil
@@ -678,18 +635,6 @@ func (m *Model) startLive(pkg string, install bool) tea.Cmd {
 		m.task = "Removing " + pkg
 	}
 	return m.startTask(live)
-}
-
-// executePending runs the install/remove that was confirmed via the
-// confirmation prompt.
-func (m *Model) executePending() tea.Cmd {
-	pkg := m.confirmPkg
-	if pkg == "" {
-		return nil
-	}
-	m.confirm = false
-	m.confirmPkg = ""
-	return m.startLive(pkg, m.confirmInstall)
 }
 
 func (m *Model) startTask(live *pkgmanager.Live) tea.Cmd {

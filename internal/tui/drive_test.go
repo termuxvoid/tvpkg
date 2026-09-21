@@ -82,14 +82,11 @@ func TestDrive(t *testing.T) {
 	}
 
 	// Single tap selects the row; a double tap runs the focused action
-	// directly — no confirmation (confirmation is only tied to pill clicks).
+	// directly.
 	m = upd(m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 9, Y: 7})
 	m = upd(m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 9, Y: 7})
 	if got := m.results[0].Name; got != "nano" {
 		t.Fatalf("cursor after tap = %s, want nano", got)
-	}
-	if m.confirm {
-		t.Fatal("double-tap must not open a confirmation prompt (pill click only)")
 	}
 	if m.state != stateBusy && m.state != stateResult {
 		t.Fatalf("double-tap should run the action directly, got state=%d", m.state)
@@ -108,7 +105,7 @@ func TestDrive(t *testing.T) {
 	}
 }
 
-func TestTapPillOpensConfirm(t *testing.T) {
+func TestTapPillRunsDirect(t *testing.T) {
 	pkgs := []pkgmanager.Package{
 		{Name: "nano", Version: "7.2", Desc: "editor"},
 	}
@@ -123,28 +120,22 @@ func TestTapPillOpensConfirm(t *testing.T) {
 	// A tap on the pill row. At 80x24 the popup pads ph=18, padY=3, so the
 	// pill row is absolute row 13+4=17; the pills start at col padX+3=11.
 	m = upd(m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 12, Y: 17})
-	if !m.confirm || m.confirmPkg != "nano" || !m.confirmInstall {
-		t.Fatalf("tapping Install pill should open the confirmation dialog, got confirm=%v pkg=%q install=%v",
-			m.confirm, m.confirmPkg, m.confirmInstall)
-	}
 	if m.action != actInstall {
 		t.Fatalf("tap should set action to install, got %d", m.action)
 	}
-	if v := m.View(); !strings.Contains(v, "Install nano?") || !strings.Contains(v, "cancel") {
-		t.Fatalf("confirmation dialog should render the question and no-cancel:\n%s", dumpLines(v))
-	}
-
-	// 'n' cancels back to the popup.
-	m = upd(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
-	if m.confirm {
-		t.Fatal("n should cancel the confirmation")
+	if m.state != stateBusy && m.state != stateResult {
+		t.Fatalf("tapping the Install pill should run the action, got state=%d", m.state)
 	}
 
 	// Tapping the Remove pill (unavailable: nano not installed) must be a
-	// no-op — no prompt.
+	// no-op.
+	m = upd(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.state != stateBrowse {
+		t.Fatalf("esc should reopen the search, got state=%d", m.state)
+	}
 	m = upd(m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 21, Y: 17})
-	if m.confirm {
-		t.Fatal("tapping a disabled pill must not open a prompt")
+	if m.state != stateBrowse {
+		t.Fatal("tapping a disabled pill must be a no-op", m.state)
 	}
 }
 
