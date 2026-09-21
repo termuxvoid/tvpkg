@@ -90,6 +90,9 @@ func TestDrive(t *testing.T) {
 	if !m.confirm || m.state != stateBrowse {
 		t.Fatalf("double-tap should open confirmation prompt, got state=%d confirm=%v", m.state, m.confirm)
 	}
+	if v := m.View(); !strings.Contains(v, "Install nano?") || !strings.Contains(v, "cancel") {
+		t.Fatalf("confirmation dialog should render the question and no-cancel:\n%s", dumpLines(v))
+	}
 	// Confirm with 'y' to start the action (a nil Manager run will error).
 	m = upd(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 	if m.state != stateBusy && m.state != stateResult {

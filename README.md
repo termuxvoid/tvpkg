@@ -114,10 +114,11 @@ are displayed when removing a package.
   anything — combines well with `-y` to silently list what would happen.
 - **`TVPKG_DRY_RUN=1`**: environment-variable equivalent of `--simulate`.
 
-In the TUI, install/remove actions open a `(y) confirm / (n) cancel` dialog
-before starting.  During a live operation, `ctrl+c` asks for confirmation
-rather than quitting immediately — answering **n** keeps the operation running,
-while **y** quits (which may leave the database in a broken state).
+In the TUI, install/remove actions open a prominent centered dialog — `press y
+to run · n / esc to cancel` — before starting.  During a live operation,
+`ctrl+c` asks for confirmation rather than quitting immediately: answering
+**n** keeps the operation running, while **y** quits (which may leave the
+database in a broken state).
 
 ### Fix command
 
