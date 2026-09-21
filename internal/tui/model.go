@@ -336,9 +336,10 @@ func (m Model) updateBrowse(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		// Enter runs the focused action on the selected result.
+		// Enter runs the focused action on the selected result directly
+		// (no confirmation — confirming is done by clicking a pill).
 		if m.searching && m.search.Value() != "" && len(m.results) > 0 {
-			return m, m.runAction()
+			return m, m.runDirect()
 		}
 		return m, nil
 
@@ -391,7 +392,17 @@ func (m Model) updateBrowseMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if !m.searching || len(m.results) == 0 {
 		return m, nil
 	}
-	_, ph, _, padY := m.popupRect()
+	_, ph, padX, padY := m.popupRect()
+
+	// A tap on the action-pill row runs that action — for install/remove the
+	// confirmation dialog opens first.
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
+		innerY := msg.Y - (padY + 1)
+		if innerY == m.resultsRows(ph)+3 {
+			return m, m.tapPill(msg.X - (padX + 1) - 2)
+		}
+	}
+
 	innerY := msg.Y - (padY + 1)
 	const resultsTop = 3
 	if innerY >= resultsTop && msg.Action == tea.MouseActionPress &&
@@ -406,11 +417,11 @@ func (m Model) updateBrowseMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				if m.lastTap.at.After(time.Time{}) &&
 					now.Sub(m.lastTap.at) < 400*time.Millisecond &&
 					msg.X == m.lastTap.x && msg.Y == m.lastTap.y {
-					// Double tap: run the focused action.
+					// Double tap: run the focused action directly.
 					m.cursor = idx
 					m.syncActionToSelection()
 					m.lastTap = tap{}
-					return m, m.runAction()
+					return m, m.runDirect()
 				}
 				m.cursor = idx
 				m.syncActionToSelection()
@@ -577,8 +588,31 @@ func (m *Model) refilter() {
 	}
 }
 
-// runAction is invoked on enter/double-tap. For install and remove it
-// presents a confirmation prompt first; info executes immediately.
+// runDirect executes the currently selected action immediately. It is the
+// fast path for Enter and row double-taps: no confirmation is shown.
+func (m *Model) runDirect() tea.Cmd {
+	pkg, ok := m.selected()
+	if !ok {
+		return nil
+	}
+	if m.actionDisabled(pkg, m.action) {
+		return nil
+	}
+	switch m.action {
+	case actInfo:
+		m.state = stateDetail
+		m.infoOut = ""
+		return infoCmd(m.mgr, pkg.Name)
+	case actInstall:
+		return m.startLive(pkg.Name, true)
+	case actRemove:
+		return m.startLive(pkg.Name, false)
+	}
+	return nil
+}
+
+// runAction is invoked when an action pill is clicked/tapped. For install
+// and remove it presents the confirmation prompt first; info runs at once.
 func (m *Model) runAction() tea.Cmd {
 	pkg, ok := m.selected()
 	if !ok {
@@ -604,16 +638,29 @@ func (m *Model) runAction() tea.Cmd {
 	return nil
 }
 
-// executePending runs the install/remove that was confirmed via the
-// confirmation prompt.
-func (m *Model) executePending() tea.Cmd {
-	pkg := m.confirmPkg
-	if pkg == "" {
+// tapPill maps a tap on the action bar to its pill and runs that action.
+// x is the tap offset within the pill row (0-based, after the two-space
+// prefix). Install/remove open the confirmation dialog; info runs at once.
+func (m *Model) tapPill(x int) tea.Cmd {
+	pkg, ok := m.selected()
+	if !ok {
 		return nil
 	}
+	for _, p := range m.actionPills(pkg, ok) {
+		if x >= p.x && x < p.x+p.w {
+			m.action = p.action
+			return m.runAction()
+		}
+	}
+	return nil
+}
+
+// startLive kicks off an install (install=true) or remove (install=false) of
+// the given package in the background and returns the task command.
+func (m *Model) startLive(pkg string, install bool) tea.Cmd {
 	var live *pkgmanager.Live
 	var err error
-	if m.confirmInstall {
+	if install {
 		live, err = m.mgr.StartInstall(pkg)
 	} else {
 		live, err = m.mgr.StartRemove(pkg)
@@ -624,15 +671,25 @@ func (m *Model) executePending() tea.Cmd {
 		return nil
 	}
 	m.opPkg = pkg
-	m.opInstall = m.confirmInstall
-	m.confirm = false
-	m.confirmPkg = ""
-	if m.confirmInstall {
+	m.opInstall = install
+	if install {
 		m.task = "Installing " + pkg
 	} else {
 		m.task = "Removing " + pkg
 	}
 	return m.startTask(live)
+}
+
+// executePending runs the install/remove that was confirmed via the
+// confirmation prompt.
+func (m *Model) executePending() tea.Cmd {
+	pkg := m.confirmPkg
+	if pkg == "" {
+		return nil
+	}
+	m.confirm = false
+	m.confirmPkg = ""
+	return m.startLive(pkg, m.confirmInstall)
 }
 
 func (m *Model) startTask(live *pkgmanager.Live) tea.Cmd {

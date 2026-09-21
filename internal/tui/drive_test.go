@@ -81,22 +81,18 @@ func TestDrive(t *testing.T) {
 		t.Fatalf("want only nano selected, got cursor=%d results=%+v", m.cursor, m.results)
 	}
 
-	// Single tap selects the row; a double tap opens the confirmation prompt.
+	// Single tap selects the row; a double tap runs the focused action
+	// directly — no confirmation (confirmation is only tied to pill clicks).
 	m = upd(m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 9, Y: 7})
 	m = upd(m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 9, Y: 7})
 	if got := m.results[0].Name; got != "nano" {
 		t.Fatalf("cursor after tap = %s, want nano", got)
 	}
-	if !m.confirm || m.state != stateBrowse {
-		t.Fatalf("double-tap should open confirmation prompt, got state=%d confirm=%v", m.state, m.confirm)
+	if m.confirm {
+		t.Fatal("double-tap must not open a confirmation prompt (pill click only)")
 	}
-	if v := m.View(); !strings.Contains(v, "Install nano?") || !strings.Contains(v, "cancel") {
-		t.Fatalf("confirmation dialog should render the question and no-cancel:\n%s", dumpLines(v))
-	}
-	// Confirm with 'y' to start the action (a nil Manager run will error).
-	m = upd(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
 	if m.state != stateBusy && m.state != stateResult {
-		t.Fatalf("confirming should start the action, got state=%d", m.state)
+		t.Fatalf("double-tap should run the action directly, got state=%d", m.state)
 	}
 
 	// A successful operation must stay on the Result window until esc,
@@ -109,6 +105,46 @@ func TestDrive(t *testing.T) {
 	m = upd(m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.state != stateBrowse {
 		t.Fatalf("esc from result should reopen the search, got state=%d", m.state)
+	}
+}
+
+func TestTapPillOpensConfirm(t *testing.T) {
+	pkgs := []pkgmanager.Package{
+		{Name: "nano", Version: "7.2", Desc: "editor"},
+	}
+	var m Model = New(detect.Info{Kind: detect.APT}, &pkgmanager.Manager{})
+	m = upd(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = upd(m, loadPkgsMsg{pkgs: pkgs, installed: 0})
+	key := func(r rune) {
+		m = upd(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(string(r))})
+	}
+	key('n')
+
+	// A tap on the pill row. At 80x24 the popup pads ph=18, padY=3, so the
+	// pill row is absolute row 13+4=17; the pills start at col padX+3=11.
+	m = upd(m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 12, Y: 17})
+	if !m.confirm || m.confirmPkg != "nano" || !m.confirmInstall {
+		t.Fatalf("tapping Install pill should open the confirmation dialog, got confirm=%v pkg=%q install=%v",
+			m.confirm, m.confirmPkg, m.confirmInstall)
+	}
+	if m.action != actInstall {
+		t.Fatalf("tap should set action to install, got %d", m.action)
+	}
+	if v := m.View(); !strings.Contains(v, "Install nano?") || !strings.Contains(v, "cancel") {
+		t.Fatalf("confirmation dialog should render the question and no-cancel:\n%s", dumpLines(v))
+	}
+
+	// 'n' cancels back to the popup.
+	m = upd(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	if m.confirm {
+		t.Fatal("n should cancel the confirmation")
+	}
+
+	// Tapping the Remove pill (unavailable: nano not installed) must be a
+	// no-op — no prompt.
+	m = upd(m, tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: 21, Y: 17})
+	if m.confirm {
+		t.Fatal("tapping a disabled pill must not open a prompt")
 	}
 }
 
@@ -245,8 +281,8 @@ func TestPacmanInfoDisabledForUninstalled(t *testing.T) {
 		t.Fatalf("cycle on uninstalled pacman pkg=%d, want actInstall (others disabled)", m.action)
 	}
 	// Enter must never run a disabled action (no busy state, no install).
-	if cmd := m.runAction(); cmd != nil {
-		t.Fatal("runAction on all-disabled selection should be a no-op")
+	if cmd := m.runDirect(); cmd != nil {
+		t.Fatal("runDirect on all-disabled selection should be a no-op")
 	}
 }
 
