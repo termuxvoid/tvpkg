@@ -223,7 +223,7 @@ func (m Model) popupView() string {
 	lines = append(lines, lipgloss.NewStyle().Foreground(colSubtext).Render(
 		"  "+help("↑/↓", "move")+sepHelp+help("←/→", "action")+sepHelp+help("enter", "run")+
 			sepHelp+help("tab", "action")+sepHelp+help("esc", "close"))+"  "+lipgloss.NewStyle().
-		Foreground(colOverlay).Render("[tap select · double-tap run · scroll navigate]"))
+		Foreground(colOverlay).Render("[tap select · tap a pill to run · double-tap run · scroll]"))
 
 	// Normalize line count to the inner height.
 	for len(lines) < ph-2 {
@@ -375,25 +375,49 @@ func (m Model) header() string {
 			" / "+statNumStyle.Render(fmt.Sprintf("%d", len(m.pkgs)))+" installed")
 }
 
-// actionBar renders the Install / Remove / Info pills, honoring the selected
-// package's state: an installed package shows a green "installed" tag in the
-// Install slot, and remove is dimmed for packages that are not installed.
+// pill is one action bar button with its layout offset, so taps can be
+// mapped back to an action.
+type pill struct {
+	action action
+	text   string
+	x, w   int
+}
+
+// actionPills renders the Install / Remove / Info pills and reports each
+// pill's horizontal span (offsets are relative to the pill row start, after
+// the popup's two-space prefix). Honoring the selected package's state: an
+// installed package shows a green "installed" tag in the Install slot, and
+// remove is dimmed for packages that are not installed.
+func (m Model) actionPills(pkg pkgmanager.Package, hasPkg bool) []pill {
+	pills := make([]pill, 0, actCount)
+	x := 0
+	for a := actInstall; a < actCount; a++ {
+		var s string
+		if hasPkg && a == actInstall && pkg.Installed {
+			s = installedTagStyle.Render("installed")
+		} else {
+			style := actionInactiveStyle
+			disabled := hasPkg && a != actInstall && m.actionDisabled(pkg, a)
+			if disabled {
+				style = disabledActionStyle
+			}
+			if m.action == a && !disabled {
+				style = actionActiveStyle
+			}
+			s = style.Render(a.String())
+		}
+		pills = append(pills, pill{action: a, x: x, w: lipgloss.Width(s), text: s})
+		x += lipgloss.Width(s)
+	}
+	return pills
+}
+
+// actionBar renders the Install / Remove / Info pills for the selected
+// package.
 func (m Model) actionBar(pkg pkgmanager.Package, hasPkg bool) string {
 	var sb strings.Builder
-	for a := actInstall; a < actCount; a++ {
-		if hasPkg && a == actInstall && pkg.Installed {
-			sb.WriteString(installedTagStyle.Render("installed"))
-			continue
-		}
-		style := actionInactiveStyle
-		disabled := hasPkg && a != actInstall && m.actionDisabled(pkg, a)
-		if disabled {
-			style = disabledActionStyle
-		}
-		if m.action == a && !disabled {
-			style = actionActiveStyle
-		}
-		sb.WriteString(style.Render(a.String()))
+	for _, p := range m.actionPills(pkg, hasPkg) {
+		sb.WriteString(p.text)
 	}
 	return strings.TrimSpace(sb.String())
 }
